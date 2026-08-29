@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="description" content="トラック運転者向けの勤怠・改善基準チェックPWA">
+  <title>運送業 勤怠・改善基準チェッカー v8.1.0</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon-192.png">
+  <link rel="apple-touch-icon" href="./icon-192.png">
+  <link rel="stylesheet" href="./style.css?v=8.1.0">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+</head>
+<body>
+<header>
+  <div class="header-row">
+    <div><h1>🚚 勤怠・改善基準チェッカー <small>v8.1.0</small></h1><p>ワンタップ打刻・作業別GPS・月間集計・改善基準チェック</p></div>
+    <div id="liveClock" class="clock">--</div>
+  </div>
+</header>
+<main>
+  <section class="card no-print" id="statusCard">
+    <div class="status-grid">
+      <div><span>勤務状態</span><strong id="shiftState">未始業</strong></div>
+      <div><span>始業</span><strong id="shiftStartText">-</strong></div>
+      <div><span>現在作業</span><strong id="activeTypeText">-</strong></div>
+      <div><span>拘束時間</span><strong id="elapsedText">0:00</strong></div>
+    </div>
+    <div class="main-actions">
+      <button id="startShiftBtn" class="btn start big">▶ 始業開始</button>
+      <button id="endShiftBtn" class="btn end big">■ 終業</button>
+    </div>
+    <div class="gps-grid">
+      <div class="gps-box"><span>📍 始業GPS</span><strong id="startGpsText">未取得</strong><button id="retryStartGpsBtn" class="btn soft small">再取得</button></div>
+      <div class="gps-box"><span>🏁 終業GPS</span><strong id="endGpsText">未取得</strong><button id="retryEndGpsBtn" class="btn soft small">再取得</button></div>
+    </div>
+    <p class="hint">始業・終業・各作業ボタンを押した時点のGPSを保存します。住所に加えて緯度経度・精度・取得時刻も表示します。位置取得に失敗しても打刻自体は保存します。</p>
+  </section>
+
+  <section class="card no-print">
+    <h2>運行メモ</h2>
+    <div class="route-grid">
+      <div class="route-card return"><b>↩ 復路分（朝に荷卸しする分）</b><label>都道府県<input id="returnPref" list="prefList" placeholder="例：埼玉県"></label><label>市区町村<input id="returnCity" placeholder="例：久喜市"></label><label>メモ<input id="returnExtra" placeholder="例：○○センター"></label></div>
+      <div class="route-card outbound"><b>➡ 往路分（当日積み込んで向かう分）</b><label>都道府県<input id="outPref" list="prefList" placeholder="例：愛知県"></label><label>市区町村<input id="outCity" placeholder="例：小牧市"></label><label>メモ<input id="outExtra" placeholder="例：△△物流"></label></div>
+    </div>
+    <datalist id="prefList"></datalist>
+  </section>
+
+  <section class="card no-print">
+    <h2>作業打刻</h2>
+    <div id="activityButtons" class="activity-grid"></div>
+    <p class="hint">運転・待機・荷積み・荷卸し・休憩・その他の開始／終了位置を自動記録します。</p>
+    <div id="liveTimeline" class="timeline"></div>
+  </section>
+
+  <section class="card no-print">
+    <h2>休息期間</h2>
+    <div class="main-actions"><button id="restStartBtn" class="btn start">休息開始</button><button id="restEndBtn" class="btn end">休息終了</button></div>
+    <div id="restStatus" class="hint">休息記録なし</div>
+  </section>
+
+  <section class="card no-print">
+    <h2>設定</h2>
+    <div class="settings-grid">
+      <label>基礎時給（円）<input id="hourlyRate" type="number" min="0" step="1"></label>
+      <label>所定開始<input id="scheduledStart" type="time"></label>
+      <label>所定終了<input id="scheduledEnd" type="time"></label>
+      <label>1日の所定実働（時間）<input id="dailyStandardHours" type="number" min="1" max="12" step="0.25"></label>
+      <label>2週平均の起算日<input id="biweekStart" type="date"></label>
+    </div>
+    <button id="saveSettingsBtn" class="btn primary">設定を保存</button>
+    <p class="hint">残業代は入力した基礎時給から概算します。会社の賃金規程・固定残業・歩合給等がある場合は別途確認が必要です。</p>
+  </section>
+
+  <section class="card monthly-card">
+    <div class="toolbar no-print"><div><label>表示月<input id="monthPicker" type="month"></label></div><button id="refreshBtn" class="btn soft">集計更新</button><button id="csvBtn" class="btn soft">CSV出力</button><button id="printBtn" class="btn soft">PDF/印刷</button></div>
+    <h2>月間勤務表</h2>
+    <div id="monthSummary" class="summary-grid"></div>
+    <div class="table-wrap"><table><thead><tr><th>日付</th><th>曜日</th><th>出勤</th><th>開始場所</th><th>退勤</th><th>終了場所</th><th>拘束</th><th>実働</th><th>運転</th><th>待機</th><th>荷積</th><th>荷卸</th><th>休憩</th><th>その他</th><th>時間外</th><th>深夜</th><th>概算時間外等</th><th>休憩</th><th>24h拘束</th><th>休息</th><th>2日平均</th><th>2週平均</th><th>総合</th><th>復路</th><th>往路</th><th>作業GPS</th></tr></thead><tbody id="monthBody"></tbody><tfoot id="monthFoot"></tfoot></table></div>
+  </section>
+
+  <section class="card no-print">
+    <h2>勤務履歴</h2>
+    <div id="history"></div>
+  </section>
+
+  <section class="card no-print">
+    <h2>データ保護・アプリ</h2>
+    <div class="backup-grid"><button id="installBtn" class="btn soft">ホーム画面にインストール</button><button id="backupBtn" class="btn soft">バックアップ</button><button id="restoreBtn" class="btn soft">復元</button><input id="restoreFile" type="file" accept="application/json" hidden><button id="clearTestBtn" class="btn danger">全データ削除</button></div>
+    <div id="appStatus" class="hint"></div>
+  </section>
+
+  <section class="card rules-card no-print">
+    <h2>改善基準チェック（通常ルール）</h2>
+    <p class="hint">2024年4月適用のトラック運転者の改善基準告示を参考にした補助判定です。通常ルールとして、1日13時間、最大15時間、休息11時間を基本・9時間未満不可、2日平均1日9時間、2週平均1週44時間、連続運転4時間を確認します。宿泊を伴う長距離貨物運送、フェリー、2人乗務、予期し得ない事象などの例外は自動適用しません。</p>
+  </section>
+</main>
+<script src="./app.js?v=8.1.0" defer></script>
+</body>
+</html>
