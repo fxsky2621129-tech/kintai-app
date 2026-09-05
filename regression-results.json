@@ -1,0 +1,134 @@
+[
+  {
+    "name": "auto drive and repeated activity tap",
+    "status": "PASS"
+  },
+  {
+    "name": "overnight scheduled work has no overtime",
+    "status": "PASS"
+  },
+  {
+    "name": "overnight boundaries and night premium",
+    "status": "PASS"
+  },
+  {
+    "name": "early morning belongs to previous schedule interval",
+    "status": "PASS"
+  },
+  {
+    "name": "two shifts daily overtime and required break",
+    "status": "PASS"
+  },
+  {
+    "name": "daily break totals are not double counted",
+    "status": "PASS"
+  },
+  {
+    "name": "independent days receive independent standard hours",
+    "status": "PASS"
+  },
+  {
+    "name": "month boundary retains documented start date attribution",
+    "status": "PASS"
+  },
+  {
+    "name": "monthly sixty hour boundary premium",
+    "status": "PASS"
+  },
+  {
+    "name": "rest closes exactly at shift start",
+    "status": "PASS"
+  },
+  {
+    "name": "GPS result survives shift end",
+    "status": "PASS"
+  },
+  {
+    "name": "latest GPS retry wins",
+    "status": "PASS"
+  },
+  {
+    "name": "stale GPS callback cannot change restored backup",
+    "status": "PASS"
+  },
+  {
+    "name": "interrupted GPS becomes retryable after reload",
+    "status": "PASS"
+  },
+  {
+    "name": "city data retries and shares in flight request",
+    "status": "PASS"
+  },
+  {
+    "name": "cached city data works without a network request",
+    "status": "PASS"
+  },
+  {
+    "name": "invalid restore preserves all saved data",
+    "status": "PASS"
+  },
+  {
+    "name": "malicious and duplicate IDs rejected",
+    "status": "PASS"
+  },
+  {
+    "name": "bad timestamp, reversed and overlapping segments rejected",
+    "status": "PASS"
+  },
+  {
+    "name": "bad settings and active type rejected",
+    "status": "PASS"
+  },
+  {
+    "name": "valid v8.5 backup roundtrip",
+    "status": "PASS"
+  },
+  {
+    "name": "storage failure rolls all keys back",
+    "status": "PASS"
+  },
+  {
+    "name": "interrupted restore journal recovers on next load",
+    "status": "PASS"
+  },
+  {
+    "name": "30 minute break resets four-hour drive",
+    "status": "PASS"
+  },
+  {
+    "name": "work interruption is flagged for review",
+    "status": "PASS"
+  },
+  {
+    "name": "three short interruptions across driving are violation",
+    "status": "PASS"
+  },
+  {
+    "name": "a normal interruption clears short sequence",
+    "status": "PASS"
+  },
+  {
+    "name": "adjacent breaks merge before counting",
+    "status": "PASS"
+  },
+  {
+    "name": "network JSON request has a timeout",
+    "status": "PASS"
+  },
+  {
+    "name": "v8.1 settings and empty records override stale legacy data",
+    "status": "PASS"
+  },
+  {
+    "name": "v7 data migration remains available",
+    "status": "PASS"
+  },
+  {
+    "name": "v8.1 per-activity GPS survives backup restore",
+    "status": "PASS"
+  },
+  {
+    "name": "clear prevents v7 data from returning",
+    "status": "PASS"
+  }
+]

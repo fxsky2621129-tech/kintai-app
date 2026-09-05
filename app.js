@@ -1,38 +1,34 @@
 'use strict';
 
-const APP_VERSION='8.1.0';
+const APP_VERSION='8.5.1';
 const KEYS={
   records:'truck_kintai_v8_records',
   settings:'truck_kintai_v8_settings',
   live:'truck_kintai_v8_live',
   rest:'truck_kintai_v8_rest',
   restLog:'truck_kintai_v8_restlog',
-  migrated:'truck_kintai_v8_migrated_802'
+  migrated:'truck_kintai_v8_migrated'
 };
-const LEGACY_VERSIONS=[
-  {records:'truck_kintai_v7_records',settings:'truck_kintai_v7_settings',live:'truck_kintai_v7_live',rest:'truck_kintai_v7_rest'},
-  {records:'truck_kintai_v6_records',settings:'truck_kintai_v6_settings',live:'truck_kintai_v6_live',rest:'truck_kintai_v6_rest'}
-];
-const OLD_MIGRATION_FLAGS=['truck_kintai_v8_migrated','truck_kintai_v8_migrated_801'];
+const LEGACY={records:'truck_kintai_v6_records',settings:'truck_kintai_v6_settings',live:'truck_kintai_v6_live',rest:'truck_kintai_v6_rest'};
 const TYPES={drive:'運転',wait:'待機',load:'荷積み',unload:'荷卸し',break:'休憩',other:'その他'};
 const PREFS=['北海道','青森県','岩手県','宮城県','秋田県','山形県','福島県','茨城県','栃木県','群馬県','埼玉県','千葉県','東京都','神奈川県','新潟県','富山県','石川県','福井県','山梨県','長野県','岐阜県','静岡県','愛知県','三重県','滋賀県','京都府','大阪府','兵庫県','奈良県','和歌山県','鳥取県','島根県','岡山県','広島県','山口県','徳島県','香川県','愛媛県','高知県','福岡県','佐賀県','長崎県','熊本県','大分県','宮崎県','鹿児島県','沖縄県'];
 const GSI_REVERSE='https://mreversegeocoder.gsi.go.jp/reverse-geocoder/LonLatToAddress';
 const LOCALGOV='https://code4fukui.github.io/localgovjp/localgovjp.json';
-const GPS_TARGET_ACCURACY=50;
-const GPS_TIMEOUT_MS=15000;
+const LOCALGOV_CACHE_KEY='truck_kintai_v8_localgov_cache';
 
+const RESTORE_JOURNAL='truck_kintai_v8_restore_journal';
+recoverRestore();
 let records=load(KEYS.records,[]);
 let settings=load(KEYS.settings,{hourlyRate:1200,scheduledStart:'08:00',scheduledEnd:'17:00',dailyStandardHours:8,biweekStart:'2026-01-05'});
 let live=load(KEYS.live,null);
 let restState=load(KEYS.rest,null);
 let restLog=load(KEYS.restLog,[]);
-if(!Array.isArray(records))records=[];else records=records.filter(r=>r&&typeof r==='object'&&!Array.isArray(r));
-if(!settings||typeof settings!=='object'||Array.isArray(settings))settings={hourlyRate:1200,scheduledStart:'08:00',scheduledEnd:'17:00',dailyStandardHours:8,biweekStart:'2026-01-05'};
-if(!live||typeof live!=='object'||Array.isArray(live))live=null;
-if(!restState||typeof restState!=='object'||Array.isArray(restState))restState=null;
-if(!Array.isArray(restLog))restLog=[];else restLog=restLog.filter(r=>r&&typeof r==='object'&&!Array.isArray(r));
 let installPrompt=null;
 let localGovRows=null;
+let localGovRequest=null;
+let dataEpoch=0;
+const gpsRequests=new Map();
+const cityRequests={return:0,out:0};
 
 function $(id){return document.getElementById(id)}
 function load(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch{return d}}
@@ -56,63 +52,242 @@ function clamp(v,min,max){return Math.min(max,Math.max(min,v))}
 
 function migrateLegacy(){
   if(localStorage.getItem(KEYS.migrated))return;
-  try{
-    if(!records.length){for(const keys of LEGACY_VERSIONS){const old=load(keys.records,[]);if(Array.isArray(old)&&old.length){records=old.map(r=>({...r,source:r.source||'punch'}));store(KEYS.records,records);break}}}
-    if(!live){for(const keys of LEGACY_VERSIONS){const x=load(keys.live,null);if(x){live=x;store(KEYS.live,live);break}}}
-    if(localStorage.getItem(KEYS.settings)===null){for(const keys of LEGACY_VERSIONS){const os=load(keys.settings,null);if(os&&typeof os==='object'){settings={...settings,...os};store(KEYS.settings,settings);break}}}
-    if(!restState){for(const keys of LEGACY_VERSIONS){const or=load(keys.rest,null);if(or){restState=or;store(KEYS.rest,restState);break}}}
-  }catch(e){}
+  const versions=[Object.fromEntries(Object.entries(LEGACY).map(([name,key])=>[name,key.replace('_v6_','_v7_')])),LEGACY];
+  for(const name of ['records','settings','live','rest']){
+    // Existing v8 values, including [] and null, must never be replaced by stale legacy data.
+    if(localStorage.getItem(KEYS[name])!==null)continue;
+    for(const keys of versions){
+      const value=load(keys[name],null);if(value===null)continue;
+      if(name==='records'){
+        if(!Array.isArray(value))continue;
+        records=value.filter(r=>r&&typeof r==='object'&&!Array.isArray(r)).map(r=>({...r,source:r.source||'punch'}));store(KEYS.records,records);
+      }else{
+        if(typeof value!=='object'||Array.isArray(value))continue;
+        if(name==='settings'){settings={...settings,...value};store(KEYS.settings,settings)}
+        else if(name==='live'){live=value;store(KEYS.live,live)}
+        else{restState=value;store(KEYS.rest,restState)}
+      }
+      break;
+    }
+  }
   localStorage.setItem(KEYS.migrated,'1');
 }
 
 function composeRoute(prefix){const pref=$(prefix+'Pref').value.trim(),city=$(prefix+'City').value.trim(),extra=$(prefix+'Extra').value.trim();return [pref,city].filter(Boolean).join(' ')+(extra?` / ${extra}`:'')}
 function syncRouteToLive(){if(!live)return;live.returnPref=$('returnPref').value.trim();live.returnCity=$('returnCity').value.trim();live.returnExtra=$('returnExtra').value.trim();live.outPref=$('outPref').value.trim();live.outCity=$('outCity').value.trim();live.outExtra=$('outExtra').value.trim();live.returnMemo=composeRoute('return');live.outboundMemo=composeRoute('out');store(KEYS.live,live)}
-function loadRouteFromLive(){if(!live)return;$('returnPref').value=live.returnPref||'';$('returnCity').value=live.returnCity||'';$('returnExtra').value=live.returnExtra||'';$('outPref').value=live.outPref||'';$('outCity').value=live.outCity||'';$('outExtra').value=live.outExtra||''}
+function setPrefOptions(){const options='<option value="">都道府県を選択</option>'+PREFS.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');$('returnPref').innerHTML=options;$('outPref').innerHTML=options}
+function uniqueCities(rows,pref){return [...new Set(rows.filter(r=>String(r.pref||'')===pref).map(r=>String(r.city||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ja'))}
+async function populateCity(prefix,selected=''){
+  const request=++cityRequests[prefix],pref=$(prefix+'Pref').value.trim(),cityEl=$(prefix+'City');
+  if(!pref){cityEl.disabled=true;cityEl.innerHTML='<option value="">都道府県を先に選択</option>';return}
+  cityEl.disabled=true;cityEl.innerHTML='<option value="">市区町村を読み込み中…</option>';
+  const rows=await getLocalGov();if(request!==cityRequests[prefix]||$(prefix+'Pref').value.trim()!==pref)return;const cities=uniqueCities(rows,pref);
+  $('routeDataStatus').textContent=cities.length?'都道府県を選ぶと市区町村を選択できます。':'市区町村を取得できません。通信復旧後に再試行します。';
+  if(!cities.length){
+    cityEl.innerHTML='<option value="">市区町村データを取得できません</option>';
+    if(selected){const o=document.createElement('option');o.value=selected;o.textContent=selected;cityEl.appendChild(o);cityEl.value=selected}
+    cityEl.disabled=false;return
+  }
+  cityEl.innerHTML='<option value="">市区町村を選択</option>'+cities.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  if(selected&&!cities.includes(selected)){const o=document.createElement('option');o.value=selected;o.textContent=selected;cityEl.appendChild(o)}
+  cityEl.value=selected||'';cityEl.disabled=false
+}
+async function loadRouteFromLive(){
+  const rp=live?.returnPref||'',rc=live?.returnCity||'',op=live?.outPref||'',oc=live?.outCity||'';
+  $('returnPref').value=rp;$('outPref').value=op;$('returnExtra').value=live?.returnExtra||'';$('outExtra').value=live?.outExtra||'';
+  await Promise.all([populateCity('return',rc),populateCity('out',oc)])
+}
+async function initRouteSelectors(){
+  setPrefOptions();
+  await loadRouteFromLive();
+  const s=$('routeDataStatus');
+  if(s)s.textContent=localGovRows?.length?'都道府県を選ぶと市区町村を選択できます。':'市区町村データは通信可能時に取得します。'
+}
 
 function emptyGps(requestedAt){return {status:'pending',requestedAt}}
-function gpsDisplay(g){if(!g)return '未取得';if(g.status==='pending')return '位置取得中…';if(g.status==='error')return `未取得：${g.error||'取得失敗'}`;const lat=Number(g.lat),lon=Number(g.lon),coords=Number.isFinite(lat)&&Number.isFinite(lon)?`${lat.toFixed(6)}, ${lon.toFixed(6)}`:'座標なし',acc=Number.isFinite(Number(g.accuracy))?`±${Math.round(Number(g.accuracy))}m`:'精度不明',at=g.positionAt?`取得 ${fmtTime(g.positionAt)}`:'';return [g.address||'',coords,acc,at].filter(Boolean).join(' / ')}
+function gpsDisplay(g){if(!g)return '未取得';if(g.status==='pending')return '位置取得中…';if(g.status==='error')return `未取得：${g.error||'取得失敗'}`;const place=[g.prefecture||'',g.municipality||''].filter(Boolean).join(' ');return place||'市町村未取得'}
+function startGpsDisplay(g){return gpsDisplay(g)}
 function gpsClass(g){if(!g)return '';return g.status==='ok'?'gps-ok':g.status==='pending'?'gps-wait':'gps-error'}
 function gpsError(err){if(!err)return '位置情報を取得できません';if(err.code===1)return '位置情報が許可されていません';if(err.code===2)return '現在位置を特定できません';if(err.code===3)return '位置取得がタイムアウトしました';return err.message||'位置情報を取得できません'}
-async function getLocalGov(){if(localGovRows)return localGovRows;try{const r=await fetch(LOCALGOV,{cache:'force-cache'});if(!r.ok)throw new Error();const data=await r.json();localGovRows=Array.isArray(data)?data:[];return localGovRows}catch{localGovRows=[];return []}}
-async function reverseGeocode(lat,lon){try{const [r,rows]=await Promise.all([fetch(`${GSI_REVERSE}?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`,{cache:'no-store'}),getLocalGov()]);if(!r.ok)throw new Error('住所変換エラー');const j=await r.json(),x=j.results||{};const code=String(x.muniCd||'').replace(/^0+/,'');const muni=rows.find(v=>String(v.cid||'').replace(/^0+/,'')===code);const address=[muni?.pref||'',muni?.city||'',x.lv01Nm||''].filter(Boolean).join(' ');return {address,prefecture:muni?.pref||'',municipality:muni?.city||'',locality:x.lv01Nm||'',muniCd:x.muniCd||''}}catch(e){return {address:'',reverseError:e.message||String(e)}}}
-function acquireGps(){return new Promise(resolve=>{if(!navigator.geolocation){resolve({status:'error',error:'このブラウザはGPSに対応していません'});return}let settled=false,best=null,watchId=null,stopRequested=false,timer=null,lastError=null;const stopWatch=()=>{if(watchId===null)stopRequested=true;else if(navigator.geolocation.clearWatch)navigator.geolocation.clearWatch(watchId)};const finishError=error=>{if(settled)return;settled=true;if(timer)clearTimeout(timer);stopWatch();resolve({status:'error',error:gpsError(error)})};const finishPosition=async position=>{if(settled)return;settled=true;if(timer)clearTimeout(timer);stopWatch();const lat=Number(position.coords.latitude),lon=Number(position.coords.longitude),accuracy=Number(position.coords.accuracy);const rev=navigator.onLine?await reverseGeocode(lat,lon):{address:'',reverseError:'オフライン'};resolve({status:'ok',lat,lon,accuracy,positionAt:new Date(position.timestamp||Date.now()).toISOString(),...rev})};const onPosition=position=>{const accuracy=Number(position.coords.accuracy),candidateAccuracy=Number.isFinite(accuracy)?accuracy:Number.POSITIVE_INFINITY,bestAccuracy=best?Number(best.coords.accuracy):Number.POSITIVE_INFINITY;if(!best||candidateAccuracy<bestAccuracy||(candidateAccuracy===bestAccuracy&&Number(position.timestamp)>Number(best.timestamp)))best=position;if(candidateAccuracy<=GPS_TARGET_ACCURACY)void finishPosition(position)};const onError=error=>{lastError=error;if(error?.code===1)finishError(error)};const options={enableHighAccuracy:true,timeout:GPS_TIMEOUT_MS,maximumAge:0};if(navigator.geolocation.watchPosition){watchId=navigator.geolocation.watchPosition(onPosition,onError,options);if(stopRequested&&navigator.geolocation.clearWatch)navigator.geolocation.clearWatch(watchId);if(!settled)timer=setTimeout(()=>{if(best)void finishPosition(best);else finishError(lastError||{code:3})},GPS_TIMEOUT_MS)}else navigator.geolocation.getCurrentPosition(position=>void finishPosition(position),finishError,options)})}
-async function setStartGpsForLive(){if(!live)return;const id=live.id,key=live.start;live.startGps=emptyGps(key);store(KEYS.live,live);renderStatus();const g=await acquireGps();if(live&&live.id===id){live.startGps={...g,requestedAt:key};store(KEYS.live,live);renderAll()}else{const r=records.find(x=>x.id===id);if(r){r.startGps={...g,requestedAt:key};store(KEYS.records,records);renderAll()}}}
-async function setEndGpsForRecord(id){const r=records.find(x=>x.id===id);if(!r)return;r.endGps=emptyGps(r.end);store(KEYS.records,records);renderAll();const g=await acquireGps();const again=records.find(x=>x.id===id);if(again){again.endGps={...g,requestedAt:r.end};store(KEYS.records,records);renderAll()}}
-async function retryStartGps(){if(live){await setStartGpsForLive();return}const r=[...records].reverse().find(x=>x.source==='punch');if(!r)return alert('勤務記録がありません');r.startGps=emptyGps(r.start);store(KEYS.records,records);renderAll();const g=await acquireGps();const x=records.find(v=>v.id===r.id);if(x){x.startGps={...g,requestedAt:r.start};store(KEYS.records,records);renderAll()}}
+async function fetchJson(url,timeout=8000){
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),timeout);
+  try{const r=await fetch(url,{cache:'no-store',signal:controller.signal});if(!r.ok)throw new Error('通信エラー '+r.status);return await r.json()}
+  finally{clearTimeout(timer)}
+}
+function validCities(rows){return Array.isArray(rows)&&rows.length>0&&rows.every(r=>r&&typeof r.pref==='string'&&typeof r.city==='string'&&r.cid!=null)}
+async function getLocalGov(){
+  if(localGovRows?.length)return localGovRows;
+  try{const cached=load(LOCALGOV_CACHE_KEY,null);if(validCities(cached)){localGovRows=cached;return localGovRows}}catch(e){}
+  if(localGovRequest)return localGovRequest;
+  localGovRequest=(async()=>{
+    try{const rows=await fetchJson(LOCALGOV);if(!validCities(rows))throw new Error('市区町村データ形式が違います');localGovRows=rows;try{store(LOCALGOV_CACHE_KEY,rows)}catch(e){}return rows}
+    catch(e){return []}
+    finally{localGovRequest=null}
+  })();
+  return localGovRequest;
+}
+async function reverseGeocode(lat,lon){
+  try{const [j,rows]=await Promise.all([fetchJson(GSI_REVERSE+'?lat='+encodeURIComponent(lat)+'&lon='+encodeURIComponent(lon)),getLocalGov()]);
+    const x=j.results||{},code=String(x.muniCd||'').replace(/^0+/,''),muni=rows.find(v=>String(v.cid).replace(/^0+/,'')===code);
+    return {address:[muni?.pref,muni?.city,x.lv01Nm].filter(Boolean).join(' '),prefecture:muni?.pref||'',municipality:muni?.city||'',locality:x.lv01Nm||'',muniCd:x.muniCd||'',reverseError:muni?'':'市区町村未取得（通信復旧後に再取得できます）'};
+  }catch(e){return {address:'',reverseError:e.message||String(e)}}
+}
+function acquireGps(){return new Promise(resolve=>{
+  let done=false;const timer=setTimeout(()=>finish({status:'error',error:'位置取得がタイムアウトしました。再取得してください'}),22000);
+  function finish(g){if(done)return;done=true;clearTimeout(timer);resolve(g)}
+  if(!navigator.geolocation){finish({status:'error',error:'このブラウザはGPSに対応していません'});return}
+  try{navigator.geolocation.getCurrentPosition(async p=>{
+    try{const lat=Number(p.coords.latitude),lon=Number(p.coords.longitude),accuracy=Number(p.coords.accuracy);
+      const rev=navigator.onLine?await reverseGeocode(lat,lon):{address:'',reverseError:'オフライン'};
+      finish({status:'ok',lat,lon,accuracy,positionAt:new Date(p.timestamp||Date.now()).toISOString(),...rev});
+    }catch(e){finish({status:'error',error:e.message||String(e)})}
+  },e=>finish({status:'error',error:gpsError(e)}),{enableHighAccuracy:true,timeout:12000,maximumAge:0})}
+  catch(e){finish({status:'error',error:gpsError(e)})}
+})}
+function gpsTarget(id){return live?.id===id?live:records.find(r=>r.id===id)}
+async function requestGps(id,field){
+  const r=gpsTarget(id);if(!r)return;
+  const epoch=dataEpoch,token=uid(),key=id+':'+field,requestedAt=field==='startGps'?r.start:r.end;
+  gpsRequests.set(key,token);r[field]=emptyGps(requestedAt);store(r===live?KEYS.live:KEYS.records,r===live?live:records);renderAll();
+  const g=await acquireGps();
+  if(dataEpoch!==epoch||gpsRequests.get(key)!==token)return;
+  gpsRequests.delete(key);const target=gpsTarget(id);if(!target)return;
+  target[field]={...g,requestedAt};store(target===live?KEYS.live:KEYS.records,target===live?live:records);renderAll();
+}
+function recoverPendingGps(){
+  let changed=false;
+  for(const r of [...records,...(live?[live]:[])])for(const field of ['startGps','endGps'])if(r[field]?.status==='pending'){
+    r[field]={...r[field],status:'error',error:'前回の取得が中断されました。再取得してください'};changed=true;
+  }
+  if(changed){store(KEYS.records,records);store(KEYS.live,live)}
+}
+async function setStartGpsForLive(){if(live)await requestGps(live.id,'startGps')}
+async function setEndGpsForRecord(id){await requestGps(id,'endGps')}
+async function retryStartGps(){const r=live||[...records].reverse().find(x=>x.source==='punch');if(!r)return alert('勤務記録がありません');await requestGps(r.id,'startGps')}
 async function retryEndGps(){const r=[...records].reverse().find(x=>x.source==='punch');if(!r)return alert('勤務記録がありません');await setEndGpsForRecord(r.id)}
 
-function startShift(){if(live)return;const t=localIso();live={id:uid(),source:'punch',start:t,segments:[],active:null,returnPref:$('returnPref').value.trim(),returnCity:$('returnCity').value.trim(),returnExtra:$('returnExtra').value.trim(),outPref:$('outPref').value.trim(),outCity:$('outCity').value.trim(),outExtra:$('outExtra').value.trim(),returnMemo:composeRoute('return'),outboundMemo:composeRoute('out'),startGps:emptyGps(t)};store(KEYS.live,live);if(!$('monthPicker').value)$('monthPicker').value=nowMonth();renderAll();void setStartGpsForLive()}
-function closeActive(at,endGps=null){if(!live?.active)return null;const segment={...live.active,id:live.active.id||uid(),end:at,endGps};live.segments.push(segment);live.active=null;return segment}
-function findSegment(id){if(live){if(live.active?.id===id)return {segment:live.active,owner:'live'};const segment=(live.segments||[]).find(s=>s.id===id);if(segment)return {segment,owner:'live'}}for(const record of records){const segment=(record.segments||[]).find(s=>s.id===id);if(segment)return {segment,owner:'records'}}return null}
-function saveSegmentGps(targets,gps){let liveChanged=false,recordsChanged=false;for(const target of targets){const found=findSegment(target.id);if(!found)continue;found.segment[target.field]={...gps,requestedAt:target.requestedAt};if(found.owner==='live')liveChanged=true;else recordsChanged=true}if(liveChanged)store(KEYS.live,live);if(recordsChanged)store(KEYS.records,records);renderAll()}
-async function captureSegmentGps(targets){const gps=await acquireGps();saveSegmentGps(targets,gps)}
-function endShift(){if(!live)return;const t=localIso(),closed=closeActive(t,emptyGps(t));const rec={...live,end:t,active:undefined,returnMemo:composeRoute('return'),outboundMemo:composeRoute('out'),endGps:emptyGps(t)};records.push(rec);live=null;store(KEYS.records,records);store(KEYS.live,live);renderAll();void (async()=>{const gps=await acquireGps(),record=records.find(x=>x.id===rec.id);if(!record)return;record.endGps={...gps,requestedAt:t};if(closed){const segment=(record.segments||[]).find(s=>s.id===closed.id);if(segment)segment.endGps={...gps,requestedAt:t}}store(KEYS.records,records);renderAll()})()}
-function startActivity(type){if(!live)return;const t=localIso(),closed=closeActive(t,emptyGps(t)),active={id:uid(),type,start:t,startGps:emptyGps(t)};live.active=active;store(KEYS.live,live);renderAll();const targets=[{id:active.id,field:'startGps',requestedAt:t}];if(closed)targets.push({id:closed.id,field:'endGps',requestedAt:t});void captureSegmentGps(targets)}
-function endActivity(type){if(!live?.active||live.active.type!==type)return;const t=localIso(),closed=closeActive(t,emptyGps(t));store(KEYS.live,live);renderAll();if(closed)void captureSegmentGps([{id:closed.id,field:'endGps',requestedAt:t}])}
+function startShift(){if(live)return;const t=localIso();finishRestAt(t);live={id:uid(),source:'punch',start:t,segments:[],active:{type:'drive',start:t},returnPref:$('returnPref').value.trim(),returnCity:$('returnCity').value.trim(),returnExtra:$('returnExtra').value.trim(),outPref:$('outPref').value.trim(),outCity:$('outCity').value.trim(),outExtra:$('outExtra').value.trim(),returnMemo:composeRoute('return'),outboundMemo:composeRoute('out'),startGps:emptyGps(t)};store(KEYS.live,live);if(!$('monthPicker').value)$('monthPicker').value=nowMonth();renderAll();requestGps(live.id,'startGps')}
+function closeActive(at){if(!live?.active)return;live.segments.push({...live.active,end:at});live.active=null}
+function endShift(){if(!live)return;const t=localIso();closeActive(t);const rec={...live,end:t,active:undefined,returnMemo:composeRoute('return'),outboundMemo:composeRoute('out'),endGps:emptyGps(t)};records.push(rec);live=null;store(KEYS.records,records);store(KEYS.live,live);renderAll();requestGps(rec.id,'endGps')}
+function startActivity(type){if(!live||!Object.hasOwn(TYPES,type)||type==='drive'||live.active?.type===type)return;const t=localIso();closeActive(t);live.active={type,start:t};store(KEYS.live,live);renderAll()}
+function endActivity(type){if(!live?.active||live.active.type!==type||type==='drive')return;const t=localIso();closeActive(t);live.active={type:'drive',start:t};store(KEYS.live,live);renderAll()}
+function ensureAutoDriveLive(){
+  if(!live||live.active)return;
+  const segs=Array.isArray(live.segments)?live.segments:[];
+  const start=segs.length?(segs[segs.length-1].end||live.start):live.start;
+  live.active={type:'drive',start:start||localIso()};
+  store(KEYS.live,live);
+}
 
 function startRest(){if(live)return alert('勤務中は「休憩」を使用してください');if(restState?.start)return;restState={start:localIso()};store(KEYS.rest,restState);renderRest()}
-function endRest(){if(!restState?.start)return;const x={id:uid(),start:restState.start,end:localIso()};restLog.push(x);restState=null;store(KEYS.restLog,restLog);store(KEYS.rest,restState);renderRest()}
+function finishRestAt(at){if(!restState?.start)return;restLog.push({id:uid(),start:restState.start,end:new Date(at)<new Date(restState.start)?restState.start:at});restState=null;store(KEYS.restLog,restLog);store(KEYS.rest,restState)}
+function endRest(){finishRestAt(localIso());renderRest()}
 
-function effectiveRecords(){const out=records.filter(r=>r.source==='punch'&&r.start&&r.end).map(r=>structuredCloneSafe(r));if(live?.start){const t=localIso(),segs=(live.segments||[]).map(x=>({...x}));if(live.active)segs.push({...live.active,end:t,endGps:null});out.push({...structuredCloneSafe(live),id:'__live__',end:t,segments:segs,isLive:true,source:'punch'})}return out}
+function effectiveRecords(){const out=records.filter(r=>r.source==='punch'&&r.start&&r.end).map(r=>structuredCloneSafe(r));if(live?.start){const t=localIso(),segs=(live.segments||[]).map(x=>({...x}));if(live.active)segs.push({type:live.active.type,start:live.active.start,end:t});out.push({...structuredCloneSafe(live),id:'__live__',end:t,segments:segs,isLive:true,source:'punch'})}return out}
 function structuredCloneSafe(x){return JSON.parse(JSON.stringify(x))}
 function segmentHours(r,type){return (r.segments||[]).filter(s=>s.type===type&&s.start&&s.end).reduce((a,s)=>a+hoursBetween(s.start,s.end),0)}
 function workHours(r){return Object.keys(TYPES).filter(t=>t!=='break').reduce((a,t)=>a+segmentHours(r,t),0)}
 function durationHours(r){return hoursBetween(r.start,r.end)}
 function requiredBreak(work){return work>8?1:work>6?.75:0}
 
-function calcContinuous(r){const segs=(r.segments||[]).filter(s=>s.start&&s.end).sort((a,b)=>new Date(a.start)-new Date(b.start));let current=0,max=0,interrupt=0,resets=0,shortCount=0,shortRun=0,nonBreakInterruption=false;for(const s of segs){const h=hoursBetween(s.start,s.end),m=h*60;if(s.type==='drive'){current+=h;max=Math.max(max,current);shortRun=0}else if(current>0){if(m>=10){interrupt+=m;if(s.type!=='break')nonBreakInterruption=true;if(interrupt>=30){current=0;interrupt=0;resets++;shortRun=0}}else{shortCount++;shortRun++;if(shortRun>=3){/* reference only */}}}}return {maxContinuous:max,resets,shortCount,nonBreakInterruption}}
+function calcContinuous(r){
+  // Merge adjacent interruption segments, including repeated taps of the same activity.
+  const segs=[];
+  for(const s of [...(r.segments||[])].sort((a,b)=>new Date(a.start)-new Date(b.start))){
+    if(!s.start||!s.end||hoursBetween(s.start,s.end)===0)continue;
+    const prev=segs.at(-1),isDrive=s.type==='drive';
+    if(prev&&prev.isDrive===isDrive&&+new Date(prev.end)===+new Date(s.start)){
+      prev.end=s.end;prev.hasWork ||= s.type!=='break'&&!isDrive;
+    }else segs.push({start:s.start,end:s.end,isDrive,hasWork:s.type!=='break'&&!isDrive});
+  }
+  let current=0,max=0,interrupt=0,resets=0,shortCount=0,shortRun=0,shortViolation=false,nonBreakInterruption=false;
+  for(const s of segs){
+    const h=hoursBetween(s.start,s.end),m=h*60;
+    if(s.isDrive){current+=h;max=Math.max(max,current);continue}
+    if(current<=0)continue;
+    if(s.hasWork)nonBreakInterruption=true;
+    if(m<10-1e-6){shortCount++;shortRun++;if(shortRun>=3)shortViolation=true}else shortRun=0;
+    // Under-ten-minute interruptions need review of the approximate-ten-minute rule.
+    interrupt+=m;
+    if(interrupt>=30-1e-6){current=0;interrupt=0;resets++}
+  }
+  return {maxContinuous:max,resets,shortCount,nonBreakInterruption,shortViolation};
+}
+function continuousText(c){
+  const notes=[];
+  if(c.maxContinuous>4+1e-6)notes.push('連続運転4時間超');
+  if(c.shortViolation)notes.push('10分未満の中断が3回以上連続');
+  else if(c.shortCount)notes.push('要確認：10分未満の中断');
+  if(c.nonBreakInterruption)notes.push('要確認：運転中断に休憩以外の作業あり');
+  return notes.join(' ／ ');
+}
 
-function scheduledOutsideHours(r){const [sh,sm]=(settings.scheduledStart||'08:00').split(':').map(Number),[eh,em]=(settings.scheduledEnd||'17:00').split(':').map(Number);let outside=0;for(const s of (r.segments||[])){if(!s.start||!s.end||s.type==='break')continue;const a=new Date(s.start),b=new Date(s.end);let cursor=new Date(a.getFullYear(),a.getMonth(),a.getDate()-1);while(cursor<=b){const ss=new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate(),sh,sm,0),ee=new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate(),eh,em,0);const total=overlapHours(a,b,cursor,new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate()+1));const inside=overlapHours(a,b,ss,ee);outside+=Math.max(0,total-inside);cursor.setDate(cursor.getDate()+1)}}return outside}
+function workSlices(r){
+  const [sh,sm]=(settings.scheduledStart||'08:00').split(':').map(Number),[eh,em]=(settings.scheduledEnd||'17:00').split(':').map(Number);
+  const begin=sh*60+sm,finish=eh*60+em,out=[];
+  for(const seg of r.segments||[]){
+    if(seg.type==='break'||!seg.start||!seg.end)continue;
+    const a=+new Date(seg.start),b=+new Date(seg.end),cuts=new Set([a,b]);
+    for(let day=new Date(a);+day<=b;day.setDate(day.getDate()+1)){
+      for(const [h,m] of [[0,0],[5,0],[22,0],[sh,sm],[eh,em]]){
+        const t=+new Date(day.getFullYear(),day.getMonth(),day.getDate(),h,m);if(t>a&&t<b)cuts.add(t);
+      }
+      day.setHours(0,0,0,0);
+    }
+    const points=[...cuts].sort((x,y)=>x-y);
+    for(let i=1;i<points.length;i++){
+      const mid=new Date((points[i-1]+points[i])/2),minute=mid.getHours()*60+mid.getMinutes();
+      const inside=begin<finish?minute>=begin&&minute<finish:begin>finish?minute>=begin||minute<finish:false;
+      out.push({id:r.id,start:points[i-1],end:points[i],hours:(points[i]-points[i-1])/3600000,outside:!inside,night:minute>=1320||minute<300});
+    }
+  }
+  return out.sort((a,b)=>a.start-b.start);
+}
+function scheduledOutsideHours(r){return workSlices(r).filter(s=>s.outside).reduce((n,s)=>n+s.hours,0)}
 function payableOtHours(r){const std=Number(settings.dailyStandardHours)||8;return Math.max(0,workHours(r)-std,scheduledOutsideHours(r))}
-function applyPay(recordsForMonth){const rate=Number(settings.hourlyRate)||0;const sorted=[...recordsForMonth].sort((a,b)=>new Date(a.start)-new Date(b.start));let monthlyOtSoFar=0;const byId=new Map();for(const r of sorted){const ot=payableOtHours(r),night=nightWorkHours(r),otNight=Math.min(ot,night);let remaining=ot,over60=Math.max(0,monthlyOtSoFar+ot-60);over60=Math.min(over60,ot);const normalOt=ot-over60;const over60Night=Math.min(over60,otNight);const normalOtNight=Math.max(0,otNight-over60Night);const normalOtDay=Math.max(0,normalOt-normalOtNight);const over60Day=Math.max(0,over60-over60Night);const pay=rate*(normalOtDay*1.25+normalOtNight*1.50+over60Day*1.50+over60Night*1.75);monthlyOtSoFar+=ot;byId.set(r.id,{ot,night,pay})}return byId}
+function applyPay(recordsForMonth){
+  const rate=Number(settings.hourlyRate)||0,byId=new Map(),days=new Map();
+  for(const r of [...recordsForMonth].sort((a,b)=>new Date(a.start)-new Date(b.start))){
+    const key=dateKey(r.start);if(!days.has(key))days.set(key,[]);days.get(key).push(...workSlices(r));byId.set(r.id,{ot:0,night:0,pay:0});
+  }
+  const payable=[];
+  for(const slices of days.values()){
+    slices.sort((a,b)=>a.start-b.start);
+    const work=slices.reduce((n,s)=>n+s.hours,0),outside=slices.filter(s=>s.outside).reduce((n,s)=>n+s.hours,0);
+    let extra=Math.max(0,work-(Number(settings.dailyStandardHours)||8)-outside);
+    // Outside-schedule work is already overtime. Assign any extra daily excess to the latest inside-schedule work.
+    for(let i=slices.length-1;i>=0;i--){const s=slices[i];
+      if(s.outside){payable.push({...s,ot:true});continue}
+      const take=Math.min(extra,s.hours);extra-=take;
+      if(take>0)payable.push({...s,start:s.end-take*3600000,hours:take,ot:true});
+      if(s.hours>take)payable.push({...s,end:s.end-take*3600000,hours:s.hours-take,ot:false});
+    }
+  }
+  let monthlyOt=0;
+  for(const s of payable.sort((a,b)=>a.start-b.start)){
+    const p=byId.get(s.id);if(s.night){p.night+=s.hours;p.pay+=rate*s.hours*.25}
+    if(s.ot){const over60=Math.max(0,monthlyOt+s.hours-60)-Math.max(0,monthlyOt-60);p.ot+=s.hours;p.pay+=rate*(s.hours*1.25+over60*.25);monthlyOt+=s.hours}
+  }
+  return byId;
+}
 function nightWorkHours(r){let total=0;for(const s of (r.segments||[])){if(!s.start||!s.end||s.type==='break')continue;let d0=new Date(s.start),d1=new Date(s.end);for(let day=new Date(d0.getFullYear(),d0.getMonth(),d0.getDate()-1);day<=d1;day.setDate(day.getDate()+1)){const n1=new Date(day.getFullYear(),day.getMonth(),day.getDate(),22,0,0),n2=new Date(day.getFullYear(),day.getMonth(),day.getDate()+1,5,0,0);total+=overlapHours(d0,d1,n1,n2)}}return total}
 
 function rolling24For(r,all){const s=new Date(r.start),e=new Date(s.getTime()+24*3600000);return all.reduce((a,x)=>a+overlapHours(x.start,x.end,s,e),0)}
 function restAfter(r,sorted){const i=sorted.findIndex(x=>x.id===r.id);if(i<0||i===sorted.length-1)return null;return Math.max(0,(new Date(sorted[i+1].start)-new Date(r.end))/3600000)}
-function levelForRecord(c){let level='good';if(c.rolling24>15+1e-6||c.restAfter!==null&&c.restAfter<9-1e-6||c.maxContinuous>4+1e-6||c.breakShort>1e-6)level='bad';else if(c.rolling24>13+1e-6||c.restAfter!==null&&c.restAfter<11-1e-6||c.duration>13+1e-6)level='warn';return level}
-function calcRecords(list){const sorted=[...list].sort((a,b)=>new Date(a.start)-new Date(b.start));return sorted.map(r=>{const by={};for(const t of Object.keys(TYPES))by[t]=segmentHours(r,t);const work=workHours(r),duration=durationHours(r),cont=calcContinuous(r),roll=rolling24For(r,sorted),rest=restAfter(r,sorted),breakReq=requiredBreak(work),breakShort=Math.max(0,breakReq-by.break);const c={...r,startD:new Date(r.start),endD:new Date(r.end),by,work,duration,rolling24:roll,restAfter:rest,breakReq,breakShort,...cont};c.level=levelForRecord(c);return c})}
+function levelForRecord(c){let level='good';if(c.rolling24>15+1e-6||c.restAfter!==null&&c.restAfter<9-1e-6||c.maxContinuous>4+1e-6||c.breakShort>1e-6||c.shortViolation)level='bad';else if(c.rolling24>13+1e-6||c.restAfter!==null&&c.restAfter<11-1e-6||c.duration>13+1e-6||c.nonBreakInterruption||c.shortCount>0)level='warn';return level}
+function calcRecords(list){
+  const sorted=[...list].sort((a,b)=>new Date(a.start)-new Date(b.start)),totals=new Map();
+  for(const r of sorted){const key=dateKey(r.start),t=totals.get(key)||{work:0,break:0};t.work+=workHours(r);t.break+=segmentHours(r,'break');totals.set(key,t)}
+  return sorted.map(r=>{
+    const by={};for(const t of Object.keys(TYPES))by[t]=segmentHours(r,t);
+    const day=totals.get(dateKey(r.start)),breakReq=requiredBreak(day.work),breakShort=Math.max(0,breakReq-day.break);
+    const c={...r,startD:new Date(r.start),endD:new Date(r.end),by,work:workHours(r),duration:durationHours(r),rolling24:rolling24For(r,sorted),restAfter:restAfter(r,sorted),breakReq,breakShort,...calcContinuous(r)};
+    c.level=levelForRecord(c);return c;
+  });
+}
 
-function dailyMap(calc,month){const map=new Map();for(const r of calc){if(month&&monthKey(r.startD)!==month)continue;const k=dateKey(r.startD);if(!map.has(k))map.set(k,{date:k,records:[],duration:0,work:0,by:{drive:0,wait:0,load:0,unload:0,break:0,other:0},maxContinuous:0,rolling24:0,breakShort:0,level:'good',returnMemo:[],outboundMemo:[]});const d=map.get(k);d.records.push(r);d.duration+=r.duration;d.work+=r.work;for(const t of Object.keys(d.by))d.by[t]+=r.by[t]||0;d.maxContinuous=Math.max(d.maxContinuous,r.maxContinuous);d.rolling24=Math.max(d.rolling24,r.rolling24);d.breakShort+=r.breakShort;if(r.level==='bad')d.level='bad';else if(r.level==='warn'&&d.level==='good')d.level='warn';if(r.returnMemo)d.returnMemo.push(r.returnMemo);if(r.outboundMemo)d.outboundMemo.push(r.outboundMemo)}return map}
+function dailyMap(calc,month){const map=new Map();for(const r of calc){if(month&&monthKey(r.startD)!==month)continue;const k=dateKey(r.startD);if(!map.has(k))map.set(k,{date:k,records:[],duration:0,work:0,by:{drive:0,wait:0,load:0,unload:0,break:0,other:0},maxContinuous:0,rolling24:0,breakShort:0,level:'good',returnMemo:[],outboundMemo:[]});const d=map.get(k);d.records.push(r);d.duration+=r.duration;d.work+=r.work;for(const t of Object.keys(d.by))d.by[t]+=r.by[t]||0;d.maxContinuous=Math.max(d.maxContinuous,r.maxContinuous);d.rolling24=Math.max(d.rolling24,r.rolling24);d.breakShort=Math.max(d.breakShort,r.breakShort);if(r.level==='bad')d.level='bad';else if(r.level==='warn'&&d.level==='good')d.level='warn';if(r.returnMemo)d.returnMemo.push(r.returnMemo);if(r.outboundMemo)d.outboundMemo.push(r.outboundMemo)}return map}
 
 function applyTwoDay(daily,allDaily){for(const [k,d] of daily){const dt=new Date(k+'T00:00:00'),pd=new Date(dt);pd.setDate(pd.getDate()-1);const nd=new Date(dt);nd.setDate(nd.getDate()+1);const prev=allDaily.get(dateKey(pd)),next=allDaily.get(dateKey(nd));const prevDrive=prev?prev.by.drive:0;const a=(prevDrive+d.by.drive)/2;let b=null;if(nd<new Date(new Date().getFullYear(),new Date().getMonth(),new Date().getDate()+1)){const nextDrive=next?next.by.drive:0;b=(d.by.drive+nextDrive)/2}if(b!==null)d.twoDay=(a>9&&b>9)?'bad':'good';else if(a<=9)d.twoDay='good';else d.twoDay='pending'}}
 function biweekBlockStart(date){const base=new Date(settings.biweekStart+'T00:00:00');if(Number.isNaN(+base))return null;const days=Math.floor((new Date(dateKey(date)+'T00:00:00')-base)/86400000);const n=Math.floor(days/14);return new Date(base.getTime()+n*14*86400000)}
@@ -123,39 +298,164 @@ function aggregateForMonth(month){const calc=calcRecords(effectiveRecords()),all
 function twoDayText(v){return v==='bad'?'違反':v==='good'?'適合':'判定待ち'}
 function biweekText(d){const t=d.biweek==='bad'?'違反':d.biweek==='good'?'適合':'集計中';return `${t}${Number.isFinite(d.biweekDrive)?` (${fmtHM(d.biweekDrive)}/88:00)`:''}`}
 function levelBadge(level){return `<span class="badge ${level}">${level==='bad'?'違反':level==='warn'?'注意':level==='good'?'適合':'判定待ち'}</span>`}
-function segmentGpsText(record){return (record.segments||[]).map(segment=>`${TYPES[segment.type]||segment.type||'作業'} ${fmtTime(segment.start)} 開始 ${gpsDisplay(segment.startGps)} → ${fmtTime(segment.end)} 終了 ${gpsDisplay(segment.endGps)}`).join('\n')}
-function segmentGpsHtml(record){const segments=record.segments||[];if(!segments.length)return '';return `<div class="history-segments"><b>作業位置</b>${segments.map(segment=>`<div class="history-segment"><strong>${escapeHtml(TYPES[segment.type]||segment.type||'作業')}</strong><span>${fmtTime(segment.start)} ～ ${fmtTime(segment.end)}</span><div class="segment-gps ${gpsClass(segment.startGps)}">開始：${escapeHtml(gpsDisplay(segment.startGps))}</div><div class="segment-gps ${gpsClass(segment.endGps)}">終了：${escapeHtml(gpsDisplay(segment.endGps))}</div></div>`).join('')}</div>`}
-function timelineSegmentHtml(segment,isActive=false){const end=isActive?localIso():segment.end;return `<div class="timeline-row"><div class="timeline-top"><strong>${escapeHtml(TYPES[segment.type]||segment.type||'作業')}</strong><span class="${isActive?'running':''}">${fmtTime(segment.start)} ～ ${isActive?'継続中':fmtTime(segment.end)}</span><span>${fmtHM(hoursBetween(segment.start,end))}</span></div><div class="timeline-gps ${gpsClass(segment.startGps)}">開始：${escapeHtml(gpsDisplay(segment.startGps))}</div><div class="timeline-gps ${gpsClass(segment.endGps)}">終了：${isActive?'作業終了時に取得':escapeHtml(gpsDisplay(segment.endGps))}</div></div>`}
 
 function renderClock(){const d=new Date();$('liveClock').textContent=`${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())}（${dayLabel(d)}） ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`}
-function renderStatus(){const now=localIso();$('shiftState').textContent=live?'勤務中':'未始業';$('shiftStartText').textContent=live?fmtDateTime(live.start):'-';$('activeTypeText').textContent=live?.active?TYPES[live.active.type]:'-';$('elapsedText').textContent=live?fmtHM(hoursBetween(live.start,now)):'0:00';$('startShiftBtn').disabled=!!live;$('endShiftBtn').disabled=!live;const latest=[...records].reverse().find(r=>r.source==='punch');const sg=live?.startGps||latest?.startGps,eg=live?null:latest?.endGps;$('startGpsText').textContent=gpsDisplay(sg);$('startGpsText').className=gpsClass(sg);$('endGpsText').textContent=live?'勤務中（終業時に取得）':gpsDisplay(eg);$('endGpsText').className=gpsClass(eg);$('retryStartGpsBtn').disabled=!(live||latest);$('retryEndGpsBtn').disabled=!!live||!latest}
-function renderActivities(){const root=$('activityButtons');root.innerHTML='';for(const [type,name] of Object.entries(TYPES)){const div=document.createElement('div');div.className='activity-card';div.innerHTML=`<b>${name}</b><div class="pair"><button class="btn start" data-start="${type}">開始＋GPS</button><button class="btn end" data-end="${type}">終了＋GPS</button></div>`;root.appendChild(div)}root.querySelectorAll('[data-start]').forEach(b=>{b.disabled=!live;b.onclick=()=>startActivity(b.dataset.start)});root.querySelectorAll('[data-end]').forEach(b=>{b.disabled=!live?.active||live.active.type!==b.dataset.end;b.onclick=()=>endActivity(b.dataset.end)});const tl=$('liveTimeline');if(!live){tl.innerHTML='<p class="hint">始業すると作業履歴とGPS位置が表示されます。</p>';return}let rows=(live.segments||[]).map(segment=>timelineSegmentHtml(segment)).join('');if(live.active)rows+=timelineSegmentHtml(live.active,true);tl.innerHTML=rows||'<p class="hint">作業ボタンを押すと、その時点のGPS位置を保存します。</p>'}
+function renderStatus(){const now=localIso();$('shiftState').textContent=live?'勤務中':'未始業';$('shiftStartText').textContent=live?fmtDateTime(live.start):'-';$('activeTypeText').textContent=live?.active?TYPES[live.active.type]:'-';$('elapsedText').textContent=live?fmtHM(hoursBetween(live.start,now)):'0:00';$('startShiftBtn').disabled=!!live;$('endShiftBtn').disabled=!live;const latest=[...records].reverse().find(r=>r.source==='punch');const sg=live?.startGps||latest?.startGps,eg=live?null:latest?.endGps;$('startGpsText').textContent=startGpsDisplay(sg);$('startGpsText').className=gpsClass(sg);$('endGpsText').textContent=live?'勤務中（終業時に取得）':gpsDisplay(eg);$('endGpsText').className=gpsClass(eg);$('retryStartGpsBtn').disabled=!(live||latest);$('retryEndGpsBtn').disabled=!!live||!latest}
+function renderActivities(){const root=$('activityButtons');root.innerHTML='';for(const [type,name] of Object.entries(TYPES)){if(type==='drive')continue;const div=document.createElement('div');div.className='activity-card';div.innerHTML=`<b>${name}</b><div class="pair"><button class="btn start" data-start="${type}">開始</button><button class="btn end" data-end="${type}">終了</button></div>`;root.appendChild(div)}root.querySelectorAll('[data-start]').forEach(b=>{b.disabled=!live;b.onclick=()=>startActivity(b.dataset.start)});root.querySelectorAll('[data-end]').forEach(b=>{b.disabled=!live?.active||live.active.type!==b.dataset.end;b.onclick=()=>endActivity(b.dataset.end)});const tl=$('liveTimeline');if(!live){tl.innerHTML='<p class="hint">始業開始と同時に運転時間の計測を開始します。</p>';return}let rows=(live.segments||[]).map(s=>`<div class="timeline-row"><span>${escapeHtml(TYPES[s.type])}</span><span>${fmtTime(s.start)} ～ ${fmtTime(s.end)}</span><span>${fmtHM(hoursBetween(s.start,s.end))}</span></div>`).join('');if(live.active)rows+=`<div class="timeline-row"><span>${escapeHtml(TYPES[live.active.type])}</span><span class="running">${fmtTime(live.active.start)} ～ 継続中</span><span>${fmtHM(hoursBetween(live.active.start,localIso()))}</span></div>`;tl.innerHTML=rows||'<p class="hint">始業開始と同時に運転時間の計測を開始します。</p>'}
 function renderRest(){if(restState?.start){$('restStatus').textContent=`休息中：${fmtDateTime(restState.start)} ～（${fmtHM(hoursBetween(restState.start,localIso()))}）`;$('restStartBtn').disabled=true;$('restEndBtn').disabled=false}else{const last=restLog.at(-1);$('restStatus').textContent=last?`前回：${fmtDateTime(last.start)} ～ ${fmtDateTime(last.end)}（${fmtHM(hoursBetween(last.start,last.end))}）`:'休息記録なし';$('restStartBtn').disabled=!!live;$('restEndBtn').disabled=true}}
 function renderSettings(){$('hourlyRate').value=settings.hourlyRate;$('scheduledStart').value=settings.scheduledStart;$('scheduledEnd').value=settings.scheduledEnd;$('dailyStandardHours').value=settings.dailyStandardHours;$('biweekStart').value=settings.biweekStart}
 function renderSummary(daily){let work=0,drive=0,ot=0,pay=0,restraint=0,bad=0,over14=0;for(const d of daily.values()){work+=d.work;drive+=d.by.drive;ot+=d.ot;pay+=d.pay;restraint+=d.duration;if(d.level==='bad')bad++;if(d.rolling24>14+1e-6)over14++}const rem=284-restraint;const data=[['拘束時間',fmtHM(restraint)],['実働',fmtHM(work)],['運転',fmtHM(drive)],['時間外',fmtHM(ot)],['概算時間外等',`${Math.round(pay).toLocaleString()}円`],[rem>=0?'284h残り':'284h超過',fmtHM(Math.abs(rem))],['14h超日',`${over14}日`],['違反日',`${bad}日`]];$('monthSummary').innerHTML=data.map(x=>`<div class="summary-item"><span>${x[0]}</span><strong>${x[1]}</strong></div>`).join('')}
-function renderMonth(){const month=$('monthPicker').value||nowMonth();$('monthPicker').value=month;const {daily}=aggregateForMonth(month),[y,m]=month.split('-').map(Number),days=new Date(y,m,0).getDate(),body=$('monthBody');body.innerHTML='';for(let day=1;day<=days;day++){const k=`${y}-${pad(m)}-${pad(day)}`,d=daily.get(k),dt=new Date(y,m-1,day);const tr=document.createElement('tr');if(d?.level==='bad')tr.className='row-bad';else if(d?.level==='warn')tr.className='row-warn';if(!d){tr.innerHTML=`<td>${day}</td><td>${dayLabel(dt)}</td>${'<td></td>'.repeat(24)}`;body.appendChild(tr);continue}const starts=d.records.map(r=>fmtTime(r.start)).join('<br>'),ends=d.records.map(r=>fmtTime(r.end)).join('<br>'),sg=d.records.map(r=>escapeHtml(gpsDisplay(r.startGps))).join('<br>'),eg=d.records.map(r=>escapeHtml(gpsDisplay(r.endGps))).join('<br>'),rest=d.records.map(r=>r.restAfter===null?'判定待ち':r.restAfter<9?`違反 ${fmtHM(r.restAfter)}`:r.restAfter<11?`注意 ${fmtHM(r.restAfter)}`:`適合 ${fmtHM(r.restAfter)}`).join('<br>'),activityGps=d.records.map(r=>escapeHtml(segmentGpsText(r)).replaceAll('\n','<br>')).filter(Boolean).join('<hr>');tr.innerHTML=`<td>${day}</td><td>${dayLabel(dt)}</td><td>${starts}</td><td class="wrap">${sg}</td><td>${ends}</td><td class="wrap">${eg}</td><td>${fmtHM(d.duration)}</td><td>${fmtHM(d.work)}</td><td>${fmtHM(d.by.drive)}</td><td>${fmtHM(d.by.wait)}</td><td>${fmtHM(d.by.load)}</td><td>${fmtHM(d.by.unload)}</td><td>${fmtHM(d.by.break)}</td><td>${fmtHM(d.by.other)}</td><td>${fmtHM(d.ot)}</td><td>${fmtHM(d.night)}</td><td>${Math.round(d.pay).toLocaleString()}円</td><td>${d.breakShort>0?`不足${Math.round(d.breakShort*60)}分`:'適合'}</td><td>${d.rolling24>15?'違反':d.rolling24>13?'注意':'適合'} ${fmtHM(d.rolling24)}</td><td>${rest}</td><td>${twoDayText(d.twoDay)}</td><td>${biweekText(d)}</td><td>${levelBadge(d.level)}</td><td class="wrap">${escapeHtml(d.returnMemo.join(' / '))}</td><td class="wrap">${escapeHtml(d.outboundMemo.join(' / '))}</td><td class="wrap activity-gps-cell">${activityGps}</td>`;body.appendChild(tr)}renderSummary(daily)}
-function renderHistory(){const calc=calcRecords(effectiveRecords()).filter(r=>!r.isLive).slice().reverse();if(!calc.length){$('history').innerHTML='<p class="hint">勤務履歴はありません。</p>';return}$('history').innerHTML=calc.slice(0,60).map(r=>`<div class="history-item"><div class="history-head"><div><div class="history-title">${fmtDateTime(r.start)} ～ ${fmtDateTime(r.end)}</div><div class="history-meta">拘束 ${fmtHM(r.duration)} ／ 実働 ${fmtHM(r.work)} ／ 運転 ${fmtHM(r.by.drive)} ／ 休憩 ${fmtHM(r.by.break)}<br>📍 ${escapeHtml(gpsDisplay(r.startGps))}<br>🏁 ${escapeHtml(gpsDisplay(r.endGps))}<br>復路：${escapeHtml(r.returnMemo||'')}<br>往路：${escapeHtml(r.outboundMemo||'')}</div></div>${levelBadge(r.level)}</div>${segmentGpsHtml(r)}<div class="history-actions"><button class="btn soft small" onclick="window.retryRecordStart('${r.id}')">開始GPS再取得</button><button class="btn soft small" onclick="window.retryRecordEnd('${r.id}')">終了GPS再取得</button><button class="btn danger small" onclick="window.deleteRecord('${r.id}')">削除</button></div></div>`).join('')}
+function renderMonth(){const month=$('monthPicker').value||nowMonth();$('monthPicker').value=month;const {daily}=aggregateForMonth(month),[y,m]=month.split('-').map(Number),days=new Date(y,m,0).getDate(),body=$('monthBody');body.innerHTML='';for(let day=1;day<=days;day++){const k=`${y}-${pad(m)}-${pad(day)}`,d=daily.get(k),dt=new Date(y,m-1,day);const tr=document.createElement('tr');if(d?.level==='bad')tr.className='row-bad';else if(d?.level==='warn')tr.className='row-warn';if(!d){tr.innerHTML=`<td>${day}</td><td>${dayLabel(dt)}</td>${'<td></td>'.repeat(23)}`;body.appendChild(tr);continue}const starts=d.records.map(r=>fmtTime(r.start)).join('<br>'),ends=d.records.map(r=>fmtTime(r.end)).join('<br>'),sg=d.records.map(r=>escapeHtml(gpsDisplay(r.startGps))).join('<br>'),eg=d.records.map(r=>escapeHtml(gpsDisplay(r.endGps))).join('<br>'),rest=d.records.map(r=>r.restAfter===null?'判定待ち':r.restAfter<9?`違反 ${fmtHM(r.restAfter)}`:r.restAfter<11?`注意 ${fmtHM(r.restAfter)}`:`適合 ${fmtHM(r.restAfter)}`).join('<br>');tr.innerHTML=`<td>${day}</td><td>${dayLabel(dt)}</td><td>${starts}</td><td class="wrap gps-cell">${sg}</td><td>${ends}</td><td class="wrap gps-cell">${eg}</td><td>${fmtHM(d.duration)}</td><td>${fmtHM(d.work)}</td><td>${fmtHM(d.by.drive)}</td><td>${fmtHM(d.by.wait)}</td><td>${fmtHM(d.by.load)}</td><td>${fmtHM(d.by.unload)}</td><td>${fmtHM(d.by.break)}</td><td>${fmtHM(d.by.other)}</td><td>${fmtHM(d.ot)}</td><td>${fmtHM(d.night)}</td><td>${Math.round(d.pay).toLocaleString()}円</td><td>${d.breakShort>0?`不足${Math.round(d.breakShort*60)}分`:'適合'}</td><td>${d.rolling24>15?'違反':d.rolling24>13?'注意':'適合'} ${fmtHM(d.rolling24)}</td><td>${rest}</td><td>${twoDayText(d.twoDay)}</td><td>${biweekText(d)}</td><td>${levelBadge(d.level)}<br>${escapeHtml([...new Set(d.records.map(continuousText).filter(Boolean))].join(" / "))}</td><td class="wrap">${escapeHtml(d.returnMemo.join(' / '))}</td><td class="wrap">${escapeHtml(d.outboundMemo.join(' / '))}</td>`;body.appendChild(tr)}renderSummary(daily)}
+function renderHistory(){
+  const calc=calcRecords(effectiveRecords()).filter(r=>!r.isLive).reverse(),root=$('history');root.replaceChildren();
+  if(!calc.length){const p=document.createElement('p');p.className='hint';p.textContent='勤務履歴はありません。';root.appendChild(p);return}
+  for(const r of calc.slice(0,60)){
+    const item=document.createElement('div');item.className='history-item';
+    const title=document.createElement('div');title.className='history-title';title.textContent=fmtDateTime(r.start)+' ～ '+fmtDateTime(r.end);
+    const meta=document.createElement('div');meta.className='history-meta';meta.style.whiteSpace='pre-line';
+    meta.textContent='拘束 '+fmtHM(r.duration)+' ／ 実働 '+fmtHM(r.work)+' ／ 運転 '+fmtHM(r.by.drive)+' ／ 休憩 '+fmtHM(r.by.break)+'\n📍 '+gpsDisplay(r.startGps)+'\n🏁 '+gpsDisplay(r.endGps)+'\n復路：'+(r.returnMemo||'')+'\n往路：'+(r.outboundMemo||'');
+    const badge=document.createElement('span');badge.className='badge '+r.level;badge.textContent=r.level==='bad'?'違反':r.level==='warn'?'注意':'適合';
+    const note=document.createElement('p');note.className='hint';note.textContent=continuousText(r);
+    const actions=document.createElement('div');actions.className='history-actions';
+    for(const [label,fn,danger] of [['開始GPS再取得',()=>window.retryRecordStart(r.id)],['終了GPS再取得',()=>window.retryRecordEnd(r.id)],['削除',()=>window.deleteRecord(r.id),true]]){
+      const b=document.createElement('button');b.className='btn small '+(danger?'danger':'soft');b.textContent=label;b.addEventListener('click',fn);actions.appendChild(b);
+    }
+    item.append(title,meta,badge,note,actions);root.appendChild(item);
+  }
+}
 function renderAppStatus(){$('appStatus').textContent=`${navigator.onLine?'オンライン':'オフライン'} ／ v${APP_VERSION} ／ データ保存先：この端末のブラウザ`}
 function renderAll(){renderStatus();renderActivities();renderRest();renderMonth();renderHistory();renderAppStatus()}
 
-window.retryRecordStart=async id=>{const r=records.find(x=>x.id===id);if(!r)return;r.startGps=emptyGps(r.start);store(KEYS.records,records);renderAll();const g=await acquireGps();const x=records.find(v=>v.id===id);if(x){x.startGps={...g,requestedAt:r.start};store(KEYS.records,records);renderAll()}};
+window.retryRecordStart=async id=>requestGps(id,'startGps');
 window.retryRecordEnd=async id=>setEndGpsForRecord(id);
 window.deleteRecord=id=>{if(!confirm('この勤務記録を削除しますか？'))return;records=records.filter(r=>r.id!==id);store(KEYS.records,records);renderAll()};
 
-function saveSettings(){settings={hourlyRate:Number($('hourlyRate').value)||0,scheduledStart:$('scheduledStart').value||'08:00',scheduledEnd:$('scheduledEnd').value||'17:00',dailyStandardHours:clamp(Number($('dailyStandardHours').value)||8,1,12),biweekStart:$('biweekStart').value||'2026-01-05'};store(KEYS.settings,settings);renderMonth();alert('設定を保存しました')}
-function exportCsv(){const month=$('monthPicker').value||nowMonth(),{daily}=aggregateForMonth(month),[y,m]=month.split('-').map(Number),days=new Date(y,m,0).getDate();const out=[['日付','曜日','出勤','開始場所','開始緯度','開始経度','開始精度m','退勤','終了場所','終了緯度','終了経度','終了精度m','拘束','実働','運転','待機','荷積','荷卸','休憩','その他','時間外','深夜','概算時間外等円','休憩判定','24h拘束','休息','2日平均','2週平均','総合','復路','往路','作業GPS明細']];for(let day=1;day<=days;day++){const k=`${y}-${pad(m)}-${pad(day)}`,d=daily.get(k),dt=new Date(y,m-1,day);if(!d){out.push([k,dayLabel(dt),...Array(30).fill('')]);continue}const sg=d.records.map(r=>r.startGps||{}),eg=d.records.map(r=>r.endGps||{});out.push([k,dayLabel(dt),d.records.map(r=>fmtTime(r.start)).join('/'),sg.map(g=>gpsDisplay(g)).join(' / '),sg.map(g=>g.lat??'').join('/'),sg.map(g=>g.lon??'').join('/'),sg.map(g=>g.accuracy??'').join('/'),d.records.map(r=>fmtTime(r.end)).join('/'),eg.map(g=>gpsDisplay(g)).join(' / '),eg.map(g=>g.lat??'').join('/'),eg.map(g=>g.lon??'').join('/'),eg.map(g=>g.accuracy??'').join('/'),fmtHM(d.duration),fmtHM(d.work),fmtHM(d.by.drive),fmtHM(d.by.wait),fmtHM(d.by.load),fmtHM(d.by.unload),fmtHM(d.by.break),fmtHM(d.by.other),fmtHM(d.ot),fmtHM(d.night),Math.round(d.pay),d.breakShort>0?`不足${Math.round(d.breakShort*60)}分`:'適合',`${d.rolling24>15?'違反':d.rolling24>13?'注意':'適合'} ${fmtHM(d.rolling24)}`,d.records.map(r=>r.restAfter===null?'判定待ち':fmtHM(r.restAfter)).join('/'),twoDayText(d.twoDay),biweekText(d),d.level==='bad'?'違反':d.level==='warn'?'注意':'適合',d.returnMemo.join(' / '),d.outboundMemo.join(' / '),d.records.map(r=>segmentGpsText(r)).filter(Boolean).join('\n---\n')])}downloadBlob('\uFEFF'+out.map(r=>r.map(csvCell).join(',')).join('\r\n'),`kintai_${month}.csv`,'text/csv;charset=utf-8')}
+function saveSettings(){
+  try{
+    const candidate=validateSettings({hourlyRate:Number($('hourlyRate').value),scheduledStart:$('scheduledStart').value,scheduledEnd:$('scheduledEnd').value,dailyStandardHours:Number($('dailyStandardHours').value),biweekStart:$('biweekStart').value});
+    store(KEYS.settings,candidate);settings=candidate;renderMonth();alert('設定を保存しました');
+  }catch(e){alert('設定を保存できません：'+e.message)}
+}
+function exportCsv(){const month=$('monthPicker').value||nowMonth(),{daily}=aggregateForMonth(month),[y,m]=month.split('-').map(Number),days=new Date(y,m,0).getDate();const out=[['日付','曜日','出勤','開始場所','開始緯度','開始経度','開始精度m','退勤','終了場所','終了緯度','終了経度','終了精度m','拘束','実働','運転','待機','荷積','荷卸','休憩','その他','時間外','深夜','概算時間外等円','休憩判定','24h拘束','休息','2日平均','2週平均','総合','復路','往路']];for(let day=1;day<=days;day++){const k=`${y}-${pad(m)}-${pad(day)}`,d=daily.get(k),dt=new Date(y,m-1,day);if(!d){out.push([k,dayLabel(dt),...Array(29).fill('')]);continue}const sg=d.records.map(r=>r.startGps||{}),eg=d.records.map(r=>r.endGps||{});out.push([k,dayLabel(dt),d.records.map(r=>fmtTime(r.start)).join('/'),sg.map(g=>startGpsDisplay(g)).join(' / '),sg.map(g=>g.lat??'').join('/'),sg.map(g=>g.lon??'').join('/'),sg.map(g=>g.accuracy??'').join('/'),d.records.map(r=>fmtTime(r.end)).join('/'),eg.map(g=>gpsDisplay(g)).join(' / '),eg.map(g=>g.lat??'').join('/'),eg.map(g=>g.lon??'').join('/'),eg.map(g=>g.accuracy??'').join('/'),fmtHM(d.duration),fmtHM(d.work),fmtHM(d.by.drive),fmtHM(d.by.wait),fmtHM(d.by.load),fmtHM(d.by.unload),fmtHM(d.by.break),fmtHM(d.by.other),fmtHM(d.ot),fmtHM(d.night),Math.round(d.pay),d.breakShort>0?`不足${Math.round(d.breakShort*60)}分`:'適合',`${d.rolling24>15?'違反':d.rolling24>13?'注意':'適合'} ${fmtHM(d.rolling24)}`,d.records.map(r=>r.restAfter===null?'判定待ち':fmtHM(r.restAfter)).join('/'),twoDayText(d.twoDay),biweekText(d),[d.level==='bad'?'違反':d.level==='warn'?'注意':'適合',...new Set(d.records.map(continuousText).filter(Boolean))].join(' / '),d.returnMemo.join(' / '),d.outboundMemo.join(' / ')])}downloadBlob('\uFEFF'+out.map(r=>r.map(csvCell).join(',')).join('\r\n'),`kintai_${month}.csv`,'text/csv;charset=utf-8')}
 function downloadBlob(content,name,type){const b=new Blob([content],{type}),u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
 function backup(){const data={app:'truck-kintai-v8',version:APP_VERSION,exportedAt:new Date().toISOString(),records,settings,live,restState,restLog};downloadBlob(JSON.stringify(data,null,2),`kintai_backup_${dateKey(new Date())}.json`,'application/json')}
-function restoreFile(file){const fr=new FileReader();fr.onload=()=>{try{const d=JSON.parse(fr.result);if(!d||!Array.isArray(d.records))throw new Error('バックアップ形式が違います');records=d.records.filter(r=>r&&typeof r==='object'&&!Array.isArray(r));settings=d.settings&&typeof d.settings==='object'&&!Array.isArray(d.settings)?{...settings,...d.settings}:settings;live=d.live&&typeof d.live==='object'&&!Array.isArray(d.live)?d.live:null;restState=d.restState&&typeof d.restState==='object'&&!Array.isArray(d.restState)?d.restState:null;restLog=Array.isArray(d.restLog)?d.restLog.filter(r=>r&&typeof r==='object'&&!Array.isArray(r)):[];saveAll();loadRouteFromLive();renderSettings();renderAll();alert('復元しました')}catch(e){alert('復元できません：'+e.message)}};fr.readAsText(file)}
-function clearAll(){if(!confirm('勤怠・GPS・設定をすべて削除します。よろしいですか？'))return;for(const k of Object.values(KEYS))localStorage.removeItem(k);for(const keys of LEGACY_VERSIONS)for(const k of Object.values(keys))localStorage.removeItem(k);for(const k of OLD_MIGRATION_FLAGS)localStorage.removeItem(k);records=[];settings={hourlyRate:1200,scheduledStart:'08:00',scheduledEnd:'17:00',dailyStandardHours:8,biweekStart:'2026-01-05'};live=null;restState=null;restLog=[];renderSettings();renderAll()}
+function recoverRestore(){
+  const raw=localStorage.getItem(RESTORE_JOURNAL);if(!raw)return;
+  const previous=JSON.parse(raw);
+  for(const key of [KEYS.records,KEYS.settings,KEYS.live,KEYS.rest,KEYS.restLog]){
+    if(!Object.hasOwn(previous,key))throw new Error('復元保護データが不正です');
+    if(previous[key]===null)localStorage.removeItem(key);else localStorage.setItem(key,previous[key]);
+  }
+  localStorage.removeItem(RESTORE_JOURNAL);
+}
+function validateSettings(value){
+  if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('設定形式が違います');
+  const s={hourlyRate:value.hourlyRate,scheduledStart:value.scheduledStart,scheduledEnd:value.scheduledEnd,dailyStandardHours:value.dailyStandardHours,biweekStart:value.biweekStart};
+  if(!Number.isFinite(s.hourlyRate)||s.hourlyRate<0||s.hourlyRate>1000000)throw new Error('基礎時給が不正です');
+  if(!Number.isFinite(s.dailyStandardHours)||s.dailyStandardHours<1||s.dailyStandardHours>12)throw new Error('所定実働が不正です');
+  if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.scheduledStart)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.scheduledEnd)||s.scheduledStart===s.scheduledEnd)throw new Error('所定開始・終了を異なる有効な時刻にしてください');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(s.biweekStart)||!validTimestamp(s.biweekStart+'T00:00:00'))throw new Error('起算日が不正です');
+  return s;
+}
+function validTimestamp(v){
+  if(typeof v!=='string'||!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)?$/.test(v)||!Number.isFinite(+new Date(v)))return false;
+  const [y,m,d]=v.slice(0,10).split('-').map(Number),dt=new Date(Date.UTC(y,m-1,d));return dt.getUTCFullYear()===y&&dt.getUTCMonth()===m-1&&dt.getUTCDate()===d;
+}
+function validateBackup(input){
+  const fail=message=>{throw new Error(message)};
+  if(!input||typeof input!=='object'||!Array.isArray(input.records))fail('バックアップ形式が違います');
+  if(input.app!=null&&!['truck-kintai-v8','truck-kintai-v6'].includes(input.app))fail('このアプリのバックアップではありません');
+  const object=x=>x&&typeof x==='object'&&!Array.isArray(x);
+  if(input.settings!=null&&!object(input.settings))fail('設定形式が違います');
+  const ids=new Set();
+  function identifier(value){
+    const id=typeof value==='number'?String(value):value;
+    if(typeof id!=='string'||!/^[A-Za-z0-9_-]{1,120}$/.test(id)||id==='__live__'||ids.has(id))fail('記録IDが不正または重複しています');ids.add(id);return id;
+  }
+  function time(value){if(!validTimestamp(value))fail('日時が不正です');return value}
+  function gps(g){
+    if(g==null)return null;if(!object(g)||!['ok','error','pending'].includes(g.status))fail('GPS形式が不正です');
+    const result={status:g.status};
+    for(const k of ['error','requestedAt','positionAt','address','prefecture','municipality','locality','muniCd','reverseError'])if(g[k]!=null){if(typeof g[k]!=='string'||g[k].length>2000)fail('GPS情報が不正です');result[k]=g[k]}
+    for(const [k,min,max] of [['lat',-90,90],['lon',-180,180],['accuracy',0,10000000]])if(g[k]!=null){if(!Number.isFinite(g[k])||g[k]<min||g[k]>max)fail('GPS座標が不正です');result[k]=g[k]}
+    if(g.status==='ok'&&(!Number.isFinite(g.lat)||!Number.isFinite(g.lon)))fail('GPS座標がありません');
+    if(result.status==='pending'){result.status='error';result.error='バックアップ時の取得は中断されています。再取得してください'}
+    return result;
+  }
+  function shift(r,isLive=false){
+    if(!object(r)||!Array.isArray(r.segments))fail('勤務記録の形式が違います');
+    if(r.source!=null&&r.source!=='punch')fail('未対応の勤務記録形式です');
+    const out={id:identifier(r.id),source:'punch',start:time(r.start),segments:[]};
+    if(!isLive){out.end=time(r.end);if(new Date(out.end)<new Date(out.start))fail('終業が始業より前です')}
+    let previous=+new Date(out.start);
+    for(const segment of r.segments){
+      if(!object(segment)||!Object.hasOwn(TYPES,segment.type))fail('作業区分が不正です');
+      const start=time(segment.start),end=time(segment.end),a=+new Date(start),b=+new Date(end);
+      if(a<previous||b<a||(!isLive&&b>+new Date(out.end)))fail('作業区間が重複しているか勤務範囲外です');
+      const cleaned={type:segment.type,start,end};
+      if(segment.id!=null)cleaned.id=identifier(segment.id);
+      if(segment.startGps!=null)cleaned.startGps=gps(segment.startGps);
+      if(segment.endGps!=null)cleaned.endGps=gps(segment.endGps);
+      out.segments.push(cleaned);previous=b;
+    }
+    if(isLive){
+      if(r.active!=null){if(!object(r.active)||!Object.hasOwn(TYPES,r.active.type))fail('進行中の作業が不正です');out.active={type:r.active.type,start:time(r.active.start)};if(+new Date(out.active.start)<previous)fail('進行中の作業が重複しています')}
+      else out.active={type:'drive',start:out.segments.at(-1)?.end||out.start};
+      if(r.active?.id!=null)out.active.id=identifier(r.active.id);
+      if(r.active?.startGps!=null)out.active.startGps=gps(r.active.startGps);
+      if(+new Date(out.active.start)>Date.now())fail('進行中の作業日時が未来です');
+    }
+    for(const k of ['returnPref','returnCity','returnExtra','outPref','outCity','outExtra','returnMemo','outboundMemo']){
+      if(r[k]!=null&&(typeof r[k]!=='string'||r[k].length>10000))fail('運行メモが不正です');out[k]=r[k]||'';
+    }
+    out.startGps=gps(r.startGps);out.endGps=gps(r.endGps);return out;
+  }
+  const candidate={records:input.records.map(r=>shift(r)),settings:validateSettings({...settings,...(input.settings||{})}),live:input.live==null?null:shift(input.live,true),restState:null,restLog:[]};
+  const chronological=[...candidate.records,...(candidate.live?[candidate.live]:[])].sort((a,b)=>new Date(a.start)-new Date(b.start));
+  for(let i=1;i<chronological.length;i++)if(!chronological[i-1].end||+new Date(chronological[i].start)<+new Date(chronological[i-1].end))fail('勤務記録が重複しています');
+  if(input.restLog!=null&&!Array.isArray(input.restLog))fail('休息履歴が不正です');
+  candidate.restLog=(input.restLog||[]).map(r=>{if(!object(r))fail('休息履歴が不正です');const out={id:identifier(r.id),start:time(r.start),end:time(r.end)};if(new Date(out.end)<new Date(out.start))fail('休息終了が開始より前です');return out});
+  if(input.restState!=null){if(!object(input.restState))fail('休息状態が不正です');candidate.restState={start:time(input.restState.start)}}
+  // Repair old backups that contain both a live shift and a running rest timer.
+  if(candidate.live&&candidate.restState){
+    const start=candidate.restState.start;
+    if(new Date(start)>new Date(candidate.live.start))fail('勤務中の休息開始が不正です');
+    candidate.restLog.push({id:uid(),start,end:candidate.live.start});candidate.restState=null;
+  }
+  calcRecords(candidate.records);return candidate;
+}
+function commitBackup(candidate){
+  const pairs=[[KEYS.records,candidate.records],[KEYS.settings,candidate.settings],[KEYS.live,candidate.live],[KEYS.rest,candidate.restState],[KEYS.restLog,candidate.restLog]];
+  const previous={};for(const [key] of pairs)previous[key]=localStorage.getItem(key);
+  // The journal remains until all writes succeed, including across a tab/browser interruption.
+  localStorage.setItem(RESTORE_JOURNAL,JSON.stringify(previous));
+  try{for(const [key,value] of pairs)store(key,value);localStorage.removeItem(RESTORE_JOURNAL)}
+  catch(e){try{recoverRestore()}catch(rollbackError){throw new Error('保存に失敗しました。元データは復元保護領域に保持しています。空き容量を確保して再読み込みしてください')}throw e}
+  dataEpoch++;gpsRequests.clear();
+  records=candidate.records;settings=candidate.settings;live=candidate.live;restState=candidate.restState;restLog=candidate.restLog;
+}
+function restoreFile(file){
+  const fr=new FileReader();
+  fr.onerror=()=>alert('復元できません：ファイルを読み込めません');
+  fr.onload=()=>{
+    try{const candidate=validateBackup(JSON.parse(fr.result));commitBackup(candidate)}
+    catch(e){alert('復元できません：'+e.message);return}
+    loadRouteFromLive();renderSettings();renderAll();alert('復元しました');
+  };
+  fr.readAsText(file);
+}
+function clearAll(){if(!confirm('勤怠・GPS・設定をすべて削除します。よろしいですか？'))return;dataEpoch++;gpsRequests.clear();for(const k of Object.values(KEYS))localStorage.removeItem(k);for(const k of Object.values(LEGACY)){localStorage.removeItem(k);localStorage.removeItem(k.replace('_v6_','_v7_'))}for(const k of ['truck_kintai_v8_migrated_801','truck_kintai_v8_migrated_802'])localStorage.removeItem(k);records=[];settings={hourlyRate:1200,scheduledStart:'08:00',scheduledEnd:'17:00',dailyStandardHours:8,biweekStart:'2026-01-05'};live=null;restState=null;restLog=[];loadRouteFromLive();renderSettings();renderAll()}
 
 function bind(){
   $('startShiftBtn').onclick=startShift;$('endShiftBtn').onclick=endShift;$('retryStartGpsBtn').onclick=retryStartGps;$('retryEndGpsBtn').onclick=retryEndGps;$('restStartBtn').onclick=startRest;$('restEndBtn').onclick=endRest;$('saveSettingsBtn').onclick=saveSettings;$('refreshBtn').onclick=renderMonth;$('csvBtn').onclick=exportCsv;$('printBtn').onclick=()=>window.print();$('backupBtn').onclick=backup;$('restoreBtn').onclick=()=>$('restoreFile').click();$('restoreFile').onchange=e=>{if(e.target.files[0])restoreFile(e.target.files[0]);e.target.value=''};$('clearTestBtn').onclick=clearAll;$('monthPicker').onchange=renderMonth;
-  for(const id of ['returnPref','returnCity','returnExtra','outPref','outCity','outExtra'])$(id).addEventListener('input',syncRouteToLive);
-  window.addEventListener('online',renderAppStatus);window.addEventListener('offline',renderAppStatus);
+  $('returnPref').addEventListener('change',async()=>{await populateCity('return','');syncRouteToLive()});
+  $('outPref').addEventListener('change',async()=>{await populateCity('out','');syncRouteToLive()});
+  $('returnCity').addEventListener('change',syncRouteToLive);$('outCity').addEventListener('change',syncRouteToLive);
+  $('returnExtra').addEventListener('input',syncRouteToLive);$('outExtra').addEventListener('input',syncRouteToLive);
+  window.addEventListener('online',async()=>{renderAppStatus();await Promise.all(['return','out'].map(p=>populateCity(p,$(p+'City').value)));syncRouteToLive()});window.addEventListener('offline',renderAppStatus);
   window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('installBtn').disabled=false});$('installBtn').onclick=async()=>{if(installPrompt){installPrompt.prompt();await installPrompt.userChoice;installPrompt=null}else alert('Chromeのメニューから「アプリをインストール」または「ホーム画面に追加」を選んでください。')};
 }
-function initPwa(){if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js',{scope:'./'}).then(r=>r.update()).catch(e=>console.warn('Service Workerを登録できませんでした',e))}}
-function init(){migrateLegacy();$('prefList').innerHTML=PREFS.map(p=>`<option value="${p}"></option>`).join('');$('monthPicker').value=nowMonth();renderSettings();loadRouteFromLive();bind();renderAll();renderClock();setInterval(()=>{renderClock();if(live){renderStatus();renderActivities()}if(restState)renderRest()},1000);setInterval(()=>{if(live)renderMonth()},15000);initPwa()}
+function initPwa(){if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').then(r=>r.update()).catch(e=>console.warn(e))}}
+async function init(){migrateLegacy();ensureAutoDriveLive();if(live&&restState)finishRestAt(live.start);recoverPendingGps();$('monthPicker').value=nowMonth();renderSettings();bind();const routes=initRouteSelectors();renderAll();renderClock();setInterval(()=>{renderClock();if(live){renderStatus();renderActivities()}if(restState)renderRest()},1000);setInterval(()=>{if(live)renderMonth()},15000);initPwa();await routes}
 
 document.addEventListener('DOMContentLoaded',init);

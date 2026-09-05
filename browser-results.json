@@ -1,0 +1,53 @@
+{
+  "results": [
+    {
+      "name": "desktop initial render without JavaScript errors",
+      "status": "PASS"
+    },
+    {
+      "name": "rest, auto-drive, activity switch, end and delayed GPS in browser",
+      "status": "PASS"
+    },
+    {
+      "name": "history renders untrusted text without executable markup",
+      "status": "PASS"
+    },
+    {
+      "name": "prefecture and municipality selectors",
+      "status": "PASS"
+    },
+    {
+      "name": "invalid file upload preserves existing data",
+      "status": "PASS"
+    },
+    {
+      "name": "v8.5 backup upload and overnight month rendering",
+      "status": "PASS"
+    },
+    {
+      "name": "CSV download",
+      "status": "PASS"
+    },
+    {
+      "name": "JSON backup download",
+      "status": "PASS"
+    },
+    {
+      "name": "390px mobile layout has no page-wide horizontal overflow",
+      "status": "PASS"
+    },
+    {
+      "name": "service worker reload with HTTP server stopped keeps saved records",
+      "status": "PASS"
+    },
+    {
+      "name": "offline status event updates the screen",
+      "status": "PASS"
+    },
+    {
+      "name": "no uncaught browser JavaScript errors across tests",
+      "status": "PASS"
+    }
+  ],
+  "errors": []
+}
