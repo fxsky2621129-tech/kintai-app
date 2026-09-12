@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION='8.6.2';
+const APP_VERSION='8.6.3';
 const KEYS={
   records:'truck_kintai_v8_records',
   settings:'truck_kintai_v8_settings',
@@ -141,14 +141,14 @@ function gpsDisplay(g){
 function gpsError(err){
   if(err?.code===1)return '位置情報が許可されていません。Androidの位置情報とChromeのサイト設定を確認してください';
   if(err?.code===2)return '現在位置を特定できません。屋外や窓際で再取得してください';
-  if(err?.code===3)return '60秒以内に位置を取得できませんでした。位置情報を有効にして再取得してください';
+  if(err?.code===3)return '端末から位置情報が返りませんでした（60秒）。AndroidでChromeの位置情報を許可し、このサイトの位置情報も許可してから「再取得」を押してください';
   return err?.message||'位置情報を取得できません';
 }
 function acquireGps(onUpdate=()=>{}){return new Promise(resolve=>{
-  const started=Date.now();let done=false,best=null,watchId=null,fallbackStarted=false,lastError={code:3};
+  const started=Date.now();let done=false,best=null,watchId=null,fallbackStarted=false,fallbackAttempts=0,retryTimer=null,lastError={code:3};
   const deadline=setTimeout(()=>finish(),60000),fallbackTimer=setTimeout(fallback,8000);
   function finish(error){
-    if(done)return;done=true;clearTimeout(deadline);clearTimeout(fallbackTimer);
+    if(done)return;done=true;clearTimeout(deadline);clearTimeout(fallbackTimer);clearTimeout(retryTimer);
     if(watchId!==null)navigator.geolocation?.clearWatch?.(watchId);
     resolve(best?{...best,locating:false}:{status:'error',error:gpsError(error||lastError),errorCode:(error||lastError)?.code||0});
   }
@@ -163,9 +163,10 @@ function acquireGps(onUpdate=()=>{}){return new Promise(resolve=>{
   }
   function error(e){if(done)return;lastError=e;if(e.code===1)finish(e);else fallback()}
   function fallback(){
-    if(done||fallbackStarted||!navigator.geolocation?.getCurrentPosition)return;
-    fallbackStarted=true;
-    try{navigator.geolocation.getCurrentPosition(accept,e=>{if(done)return;lastError=e;if(e.code===1)finish(e)},{enableHighAccuracy:false,timeout:15000,maximumAge:0})}catch(e){lastError=e}
+    if(done||fallbackStarted||fallbackAttempts>=3||!navigator.geolocation?.getCurrentPosition)return;
+    fallbackStarted=true;fallbackAttempts++;
+    const failed=e=>{if(done)return;lastError=e;if(e.code===1){finish(e);return}if(fallbackAttempts<3){retryTimer=setTimeout(()=>{fallbackStarted=false;fallback()},2000)}};
+    try{navigator.geolocation.getCurrentPosition(accept,failed,{enableHighAccuracy:false,timeout:15000,maximumAge:0})}catch(e){failed(e)}
   }
   if(globalThis.isSecureContext===false){finish({message:'HTTPSでアプリを開いてください'});return}
   if(!navigator.geolocation){finish({message:'このブラウザは位置情報に対応していません'});return}

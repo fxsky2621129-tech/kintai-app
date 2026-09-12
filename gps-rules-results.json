@@ -1,5 +1,17 @@
 [
   {
+    "name": "fallback retries transient failure and then succeeds",
+    "status": "PASS"
+  },
+  {
+    "name": "fallback retries are bounded and retain the overall deadline",
+    "status": "PASS"
+  },
+  {
+    "name": "permission denial cancels a scheduled fallback retry",
+    "status": "PASS"
+  },
+  {
     "name": "watchPosition saves progress and clears the watch at target accuracy",
     "status": "PASS"
   },
