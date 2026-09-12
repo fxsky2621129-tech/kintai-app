@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION='8.6.5';
+const APP_VERSION='8.6.6';
 const KEYS={
   records:'truck_kintai_v8_records',
   settings:'truck_kintai_v8_settings',
@@ -141,22 +141,26 @@ function gpsDisplay(g){
 function gpsError(err){
   if(err?.code===1)return '位置情報が許可されていません。Androidの位置情報とChromeのサイト設定を確認してください';
   if(err?.code===2)return '現在位置を特定できません。屋外や窓際で再取得してください';
-  if(err?.code===3)return '端末から位置情報が返りませんでした（60秒）。AndroidでChromeの位置情報を許可し、このサイトの位置情報も許可してから「再取得」を押してください';
+  if(err?.code===3)return '60秒以内に利用できる位置情報を取得できませんでした。下の取得確認の結果を共有してください';
   return err?.message||'位置情報を取得できません';
 }
 function acquireGps(onUpdate=()=>{}){return new Promise(resolve=>{
   let done=false,best=null,retryTimer=null,lastError={code:3},attempt=0;
+  let responses=0,stale=0,invalid=0,timeouts=0,unavailable=0,lastAge=null;
+  const initialVisibility=document.visibilityState||"不明";
   const deadline=setTimeout(()=>finish(),60000);
-  function finish(error){if(done)return;done=true;clearTimeout(deadline);clearTimeout(retryTimer);resolve(best?{...best,locating:false}:{status:'error',error:gpsError(error||lastError),errorCode:(error||lastError)?.code||0})}
+  function finish(error){if(done)return;done=true;clearTimeout(deadline);clearTimeout(retryTimer);const reason=stale?'古い位置情報しか取得できなかったため、打刻位置を保存しませんでした。':invalid?'端末から返った位置情報の形式・時刻を確認できませんでした。':gpsError(error||lastError);const detail='［取得確認 v8.6.6：試行'+attempt+'回／応答'+responses+'回／古い位置'+stale+'回／形式・時刻不正'+invalid+'回／タイムアウト'+timeouts+'回／特定不可'+unavailable+'回'+(lastAge!==null?'／最終位置'+lastAge+'秒前':'')+'／画面'+initialVisibility+'→'+(document.visibilityState||'不明')+'］';resolve(best?{...best,locating:false}:{status:'error',error:reason+' '+detail,errorCode:(error||lastError)?.code||0})}
   function again(high,delay){if(!done)retryTimer=setTimeout(()=>request(high),delay)}
   function request(high){
     if(done)return;const token=++attempt;let settled=false;
     const active=()=>!done&&!settled&&token===attempt;
-    const failed=e=>{if(!active())return;settled=true;lastError=e;if(e.code===1){finish(e);return}again(!high,1000)};
+    const failed=e=>{if(!active())return;settled=true;lastError=e;if(e.code===3)timeouts++;if(e.code===2)unavailable++;if(e.code===1){finish(e);return}again(!high,1000)};
     try{navigator.geolocation.getCurrentPosition(p=>{
-      if(!active())return;settled=true;
+      if(!active())return;settled=true;responses++;
       const lat=p.coords?.latitude,lon=p.coords?.longitude,accuracy=p.coords?.accuracy,timestamp=p.timestamp,now=Date.now();
-      if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180||!Number.isFinite(accuracy)||accuracy<0||!Number.isFinite(timestamp)||timestamp<now-60000||timestamp>now+10000){again(true,1000);return}
+      lastAge=Number.isFinite(timestamp)?Math.round((now-timestamp)/1000):null;
+      if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180||!Number.isFinite(accuracy)||accuracy<0||!Number.isFinite(timestamp)||timestamp>now+10000){invalid++;again(true,1000);return}
+      if(timestamp<now-60000){stale++;again(true,1000);return}
       if(!best||accuracy<best.accuracy||(accuracy===best.accuracy&&timestamp>new Date(best.positionAt).getTime())){best={status:'ok',lat,lon,accuracy,positionAt:new Date(timestamp).toISOString(),locating:true};onUpdate({...best})}
       if(accuracy<=20)finish();else again(true,5000);
     },failed,{enableHighAccuracy:high,timeout:15000,maximumAge:0})}catch(e){failed(e)}

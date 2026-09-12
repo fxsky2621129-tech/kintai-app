@@ -1,5 +1,13 @@
 [
   {
+    "name": "stale response is reported separately from no response",
+    "status": "PASS"
+  },
+  {
+    "name": "native timeout and silent callback are distinguishable",
+    "status": "PASS"
+  },
+  {
     "name": "single high accuracy starts first and saves fresh coarse device response",
     "status": "PASS"
   },
