@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION='8.6.1';
+const APP_VERSION='8.6.2';
 const KEYS={
   records:'truck_kintai_v8_records',
   settings:'truck_kintai_v8_settings',
@@ -134,19 +134,19 @@ async function reverseGeocode(lat,lon){
 function hasCoordinates(g){return g?.status==='ok'&&Number.isFinite(g.lat)&&Number.isFinite(g.lon)}
 function gpsDisplay(g){
   if(!g)return '未取得';
-  if(!hasCoordinates(g))return g.status==='pending'?'位置取得中（最大30秒）…':'未取得：'+(g.error||'再取得してください');
+  if(!hasCoordinates(g))return g.status==='pending'?'位置取得中（最大60秒）…':'未取得：'+(g.error||'再取得してください');
   const place=[g.prefecture,g.municipality,g.locality].filter(Boolean).join(' ')||g.address||'座標取得済み・住所未取得';
   return [place,Number.isFinite(g.accuracy)?'精度 ±'+Math.round(g.accuracy)+'m':'精度不明',g.positionAt?'取得 '+fmtDateTime(g.positionAt):'',g.locating?'精度を改善中…':'',g.addressPending?'住所確認中…':'',g.lateAcquisition?'打刻後の再取得位置（打刻時の位置ではありません）':'',g.retryError?'再取得失敗：保存済みの位置を保持':''].filter(Boolean).join(' ／ ');
 }
 function gpsError(err){
   if(err?.code===1)return '位置情報が許可されていません。Androidの位置情報とChromeのサイト設定を確認してください';
   if(err?.code===2)return '現在位置を特定できません。屋外や窓際で再取得してください';
-  if(err?.code===3)return '30秒以内に位置を取得できませんでした。位置情報を有効にして再取得してください';
+  if(err?.code===3)return '60秒以内に位置を取得できませんでした。位置情報を有効にして再取得してください';
   return err?.message||'位置情報を取得できません';
 }
 function acquireGps(onUpdate=()=>{}){return new Promise(resolve=>{
   const started=Date.now();let done=false,best=null,watchId=null,fallbackStarted=false,lastError={code:3};
-  const deadline=setTimeout(()=>finish(),30000),fallbackTimer=setTimeout(fallback,8000);
+  const deadline=setTimeout(()=>finish(),60000),fallbackTimer=setTimeout(fallback,8000);
   function finish(error){
     if(done)return;done=true;clearTimeout(deadline);clearTimeout(fallbackTimer);
     if(watchId!==null)navigator.geolocation?.clearWatch?.(watchId);
@@ -159,7 +159,7 @@ function acquireGps(onUpdate=()=>{}){return new Promise(resolve=>{
     if(!best||accuracy<best.accuracy){
       best={status:'ok',lat,lon,accuracy,positionAt:new Date(timestamp).toISOString(),locating:true};onUpdate({...best});
     }
-    if(accuracy<=50)finish();
+    if(accuracy<=20)finish();
   }
   function error(e){if(done)return;lastError=e;if(e.code===1)finish(e);else fallback()}
   function fallback(){
@@ -170,8 +170,8 @@ function acquireGps(onUpdate=()=>{}){return new Promise(resolve=>{
   if(globalThis.isSecureContext===false){finish({message:'HTTPSでアプリを開いてください'});return}
   if(!navigator.geolocation){finish({message:'このブラウザは位置情報に対応していません'});return}
   try{
-    if(navigator.geolocation.watchPosition){watchId=navigator.geolocation.watchPosition(accept,error,{enableHighAccuracy:true,timeout:20000,maximumAge:0});if(done)navigator.geolocation.clearWatch?.(watchId)}
-    else navigator.geolocation.getCurrentPosition(accept,error,{enableHighAccuracy:true,timeout:20000,maximumAge:0});
+    if(navigator.geolocation.watchPosition){watchId=navigator.geolocation.watchPosition(accept,error,{enableHighAccuracy:true,timeout:60000,maximumAge:0});if(done)navigator.geolocation.clearWatch?.(watchId)}
+    else navigator.geolocation.getCurrentPosition(accept,error,{enableHighAccuracy:true,timeout:60000,maximumAge:0});
   }catch(e){finish(e)}
 })}
 function saveGpsTarget(id,field,g){const r=gpsTarget(id);if(!r)return false;r[field]=g;store(r===live?KEYS.live:KEYS.records,r===live?live:records);renderAll();return true}
