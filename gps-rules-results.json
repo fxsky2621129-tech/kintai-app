@@ -1,0 +1,82 @@
+[
+  {
+    "name": "watchPosition saves progress and clears the watch at target accuracy",
+    "status": "PASS"
+  },
+  {
+    "name": "position is persisted before timeout and address response",
+    "status": "PASS"
+  },
+  {
+    "name": "GPS unavailable triggers fresh low-accuracy fallback",
+    "status": "PASS"
+  },
+  {
+    "name": "permission denial stops without repeated permission attempts",
+    "status": "PASS"
+  },
+  {
+    "name": "old cached position is rejected",
+    "status": "PASS"
+  },
+  {
+    "name": "coarse location is kept at deadline",
+    "status": "PASS"
+  },
+  {
+    "name": "retry keeps existing punch coordinates and only refreshes address",
+    "status": "PASS"
+  },
+  {
+    "name": "failed fresh acquisition never erases earlier coordinates",
+    "status": "PASS"
+  },
+  {
+    "name": "reacquired historical position is labeled as later location",
+    "status": "PASS"
+  },
+  {
+    "name": "reload retains early saved coordinates",
+    "status": "PASS"
+  },
+  {
+    "name": "all simultaneous per-record violations are collected",
+    "status": "PASS"
+  },
+  {
+    "name": "exact thresholds and one-second excess are distinguished",
+    "status": "PASS"
+  },
+  {
+    "name": "loading does not reset continuous driving in strict mode",
+    "status": "PASS"
+  },
+  {
+    "name": "continuous driving carries over split shifts with short gap",
+    "status": "PASS"
+  },
+  {
+    "name": "thirty-minute off-duty gap resets driving",
+    "status": "PASS"
+  },
+  {
+    "name": "rest violation appears on both adjoining shift dates",
+    "status": "PASS"
+  },
+  {
+    "name": "monthly excess and two-week excess are in general reasons",
+    "status": "PASS"
+  },
+  {
+    "name": "annual cumulative excess is reported only after crossing",
+    "status": "PASS"
+  },
+  {
+    "name": "unfinished following day cannot produce early two-day compliance",
+    "status": "PASS"
+  },
+  {
+    "name": "overlapping shifts are not double-counted in rolling 24h",
+    "status": "PASS"
+  }
+]

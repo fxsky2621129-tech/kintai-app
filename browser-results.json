@@ -33,6 +33,14 @@
       "status": "PASS"
     },
     {
+      "name": "all simultaneous reasons appear in the general column",
+      "status": "PASS"
+    },
+    {
+      "name": "all reasons are included in CSV export",
+      "status": "PASS"
+    },
+    {
       "name": "390px mobile layout has no page-wide horizontal overflow",
       "status": "PASS"
     },

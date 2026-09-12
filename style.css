@@ -4,3 +4,5 @@
 @media print{header,.no-print{display:none!important}body{background:#fff}main{max-width:none;padding:0}.card{border:0;box-shadow:none;padding:0}.table-wrap{overflow:visible;border:0}table{min-width:0;font-size:7px}th,td{padding:3px 2px}.summary-grid{grid-template-columns:repeat(5,1fr)}@page{size:A4 landscape;margin:5mm}}
 
 .gps-cell{min-width:90px!important;max-width:120px;line-height:1.35}
+
+.overall-cell{min-width:280px!important;max-width:440px;white-space:normal;vertical-align:top}.issue-list{margin:6px 0;padding-left:16px;line-height:1.6;text-align:left}.issue-bad{color:#991b1b;font-weight:700}.issue-warn{color:#854d0e}.issue-pending{color:#475569}.history-issues{font-size:12px;line-height:1.6}.gps-box strong{line-height:1.6}.gps-cell{white-space:normal;overflow-wrap:anywhere}@media print{.overall-cell{min-width:140px!important;max-width:220px}.issue-list{padding-left:10px}}

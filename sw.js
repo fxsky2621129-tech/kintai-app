@@ -1,6 +1,6 @@
-const VERSION='kintai-v8-5-1-auto-drive-20260905-1';
+const VERSION='kintai-v8-6-0-gps-strict-20260912-1';
 const CACHE=`${VERSION}-app`;
-const SHELL=['./','./index.html','./style.css?v=8.5.1','./app.js?v=8.5.1','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
+const SHELL=['./','./index.html','./style.css?v=8.6.0','./app.js?v=8.6.0','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',e=>{self.skipWaiting();e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)))});
 self.addEventListener('activate',e=>{e.waitUntil((async()=>{for(const k of await caches.keys()){if((k.startsWith('kintai-')||k.startsWith('truck-kintai-'))&&k!==CACHE)await caches.delete(k)}await self.clients.claim()})())});
 async function nav(req){try{const r=await fetch(req,{cache:'no-store'});const c=await caches.open(CACHE);c.put('./index.html',r.clone());return r}catch(e){const c=await caches.open(CACHE);return (await c.match('./index.html'))||Response.error()}}
