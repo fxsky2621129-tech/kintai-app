@@ -1,38 +1,38 @@
 [
   {
-    "name": "fallback retries transient failure and then succeeds",
+    "name": "single high accuracy starts first and saves fresh coarse device response",
     "status": "PASS"
   },
   {
-    "name": "fallback retries are bounded and retain the overall deadline",
+    "name": "old 925-second device response is rejected then fresh fix accepted",
     "status": "PASS"
   },
   {
-    "name": "permission denial cancels a scheduled fallback retry",
+    "name": "best fix retained and acquisition continues above twenty metres",
     "status": "PASS"
   },
   {
-    "name": "watchPosition saves progress and clears the watch at target accuracy",
+    "name": "failure switches to normal and then back to high accuracy",
     "status": "PASS"
   },
   {
-    "name": "position is persisted before timeout and address response",
+    "name": "permission denial stops without retry",
     "status": "PASS"
   },
   {
-    "name": "GPS unavailable triggers fresh low-accuracy fallback",
+    "name": "deadline ignores late callbacks and retains best fix",
     "status": "PASS"
   },
   {
-    "name": "permission denial stops without repeated permission attempts",
+    "name": "silent position provider ends at sixty seconds",
     "status": "PASS"
   },
   {
-    "name": "old cached position is rejected",
+    "name": "invalid coordinates are rejected and retried",
     "status": "PASS"
   },
   {
-    "name": "coarse location is kept at deadline",
+    "name": "fresh fix saved immediately without changing punch time or exposing coordinates",
     "status": "PASS"
   },
   {

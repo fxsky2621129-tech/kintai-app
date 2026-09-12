@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION='8.6.4';
+const APP_VERSION='8.6.5';
 const KEYS={
   records:'truck_kintai_v8_records',
   settings:'truck_kintai_v8_settings',
@@ -145,36 +145,27 @@ function gpsError(err){
   return err?.message||'位置情報を取得できません';
 }
 function acquireGps(onUpdate=()=>{}){return new Promise(resolve=>{
-  const started=Date.now();let done=false,best=null,watchId=null,fallbackStarted=false,fallbackAttempts=0,retryTimer=null,lastError={code:3};
-  const deadline=setTimeout(()=>finish(),60000),fallbackTimer=setTimeout(fallback,8000);
-  function finish(error){
-    if(done)return;done=true;clearTimeout(deadline);clearTimeout(fallbackTimer);clearTimeout(retryTimer);
-    if(watchId!==null)navigator.geolocation?.clearWatch?.(watchId);
-    resolve(best?{...best,locating:false}:{status:'error',error:gpsError(error||lastError),errorCode:(error||lastError)?.code||0});
-  }
-  function accept(p){
-    if(done)return;
-    const lat=Number(p.coords?.latitude),lon=Number(p.coords?.longitude),accuracy=Number(p.coords?.accuracy),timestamp=Number(p.timestamp||Date.now());
-    if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180||!Number.isFinite(accuracy)||accuracy<0||!Number.isFinite(timestamp)||timestamp<started-60000||timestamp>Date.now()+10000)return;
-    if(!best||accuracy<best.accuracy){
-      best={status:'ok',lat,lon,accuracy,positionAt:new Date(timestamp).toISOString(),locating:true};onUpdate({...best});
-    }
-    if(accuracy<=20)finish();
-  }
-  function error(e){if(done)return;lastError=e;if(e.code===1)finish(e);else fallback()}
-  function fallback(){
-    if(done||fallbackStarted||fallbackAttempts>=3||!navigator.geolocation?.getCurrentPosition)return;
-    fallbackStarted=true;fallbackAttempts++;
-    const failed=e=>{if(done)return;lastError=e;if(e.code===1){finish(e);return}if(fallbackAttempts<3){retryTimer=setTimeout(()=>{fallbackStarted=false;fallback()},2000)}};
-    try{navigator.geolocation.getCurrentPosition(accept,failed,{enableHighAccuracy:false,timeout:15000,maximumAge:0})}catch(e){failed(e)}
+  let done=false,best=null,retryTimer=null,lastError={code:3},attempt=0;
+  const deadline=setTimeout(()=>finish(),60000);
+  function finish(error){if(done)return;done=true;clearTimeout(deadline);clearTimeout(retryTimer);resolve(best?{...best,locating:false}:{status:'error',error:gpsError(error||lastError),errorCode:(error||lastError)?.code||0})}
+  function again(high,delay){if(!done)retryTimer=setTimeout(()=>request(high),delay)}
+  function request(high){
+    if(done)return;const token=++attempt;let settled=false;
+    const active=()=>!done&&!settled&&token===attempt;
+    const failed=e=>{if(!active())return;settled=true;lastError=e;if(e.code===1){finish(e);return}again(!high,1000)};
+    try{navigator.geolocation.getCurrentPosition(p=>{
+      if(!active())return;settled=true;
+      const lat=p.coords?.latitude,lon=p.coords?.longitude,accuracy=p.coords?.accuracy,timestamp=p.timestamp,now=Date.now();
+      if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180||!Number.isFinite(accuracy)||accuracy<0||!Number.isFinite(timestamp)||timestamp<now-60000||timestamp>now+10000){again(true,1000);return}
+      if(!best||accuracy<best.accuracy||(accuracy===best.accuracy&&timestamp>new Date(best.positionAt).getTime())){best={status:'ok',lat,lon,accuracy,positionAt:new Date(timestamp).toISOString(),locating:true};onUpdate({...best})}
+      if(accuracy<=20)finish();else again(true,5000);
+    },failed,{enableHighAccuracy:high,timeout:15000,maximumAge:0})}catch(e){failed(e)}
   }
   if(globalThis.isSecureContext===false){finish({message:'HTTPSでアプリを開いてください'});return}
-  if(!navigator.geolocation){finish({message:'このブラウザは位置情報に対応していません'});return}
-  try{
-    if(navigator.geolocation.watchPosition){watchId=navigator.geolocation.watchPosition(accept,error,{enableHighAccuracy:true,timeout:60000,maximumAge:0});if(done)navigator.geolocation.clearWatch?.(watchId)}
-    else navigator.geolocation.getCurrentPosition(accept,error,{enableHighAccuracy:true,timeout:60000,maximumAge:0});
-  }catch(e){finish(e)}
+  if(!navigator.geolocation?.getCurrentPosition){finish({message:'このブラウザは位置情報に対応していません'});return}
+  request(true);
 })}
+
 function saveGpsTarget(id,field,g){const r=gpsTarget(id);if(!r)return false;r[field]=g;store(r===live?KEYS.live:KEYS.records,r===live?live:records);renderAll();return true}
 async function enrichGpsAddress(id,field,epoch,token){
   const target=gpsTarget(id),g=target?.[field];if(!hasCoordinates(g)||!navigator.onLine)return;
