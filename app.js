@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION='8.6.3';
+const APP_VERSION='8.6.4';
 const KEYS={
   records:'truck_kintai_v8_records',
   settings:'truck_kintai_v8_settings',
