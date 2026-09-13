@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION='8.6.6';
+const APP_VERSION='8.6.7';
 const KEYS={
   records:'truck_kintai_v8_records',
   settings:'truck_kintai_v8_settings',
@@ -136,7 +136,7 @@ function gpsDisplay(g){
   if(!g)return '未取得';
   if(!hasCoordinates(g))return g.status==='pending'?'位置取得中（最大60秒）…':'未取得：'+(g.error||'再取得してください');
   const place=[g.prefecture,g.municipality,g.locality].filter(Boolean).join(' ')||g.address||'座標取得済み・住所未取得';
-  return [place,Number.isFinite(g.accuracy)?'精度 ±'+Math.round(g.accuracy)+'m':'精度不明',g.positionAt?'取得 '+fmtDateTime(g.positionAt):'',g.locating?'精度を改善中…':'',g.addressPending?'住所確認中…':'',g.lateAcquisition?'打刻後の再取得位置（打刻時の位置ではありません）':'',g.retryError?'再取得失敗：保存済みの位置を保持':''].filter(Boolean).join(' ／ ');
+  return [place,g.locating?'精度を改善中…':'',g.addressPending?'住所確認中…':'',g.lateAcquisition?'打刻後の再取得位置（打刻時の位置ではありません）':'',g.retryError?'再取得失敗：保存済みの位置を保持':''].filter(Boolean).join(' ／ ');
 }
 function gpsError(err){
   if(err?.code===1)return '位置情報が許可されていません。Androidの位置情報とChromeのサイト設定を確認してください';
@@ -149,7 +149,7 @@ function acquireGps(onUpdate=()=>{}){return new Promise(resolve=>{
   let responses=0,stale=0,invalid=0,timeouts=0,unavailable=0,lastAge=null;
   const initialVisibility=document.visibilityState||"不明";
   const deadline=setTimeout(()=>finish(),60000);
-  function finish(error){if(done)return;done=true;clearTimeout(deadline);clearTimeout(retryTimer);const reason=stale?'古い位置情報しか取得できなかったため、打刻位置を保存しませんでした。':invalid?'端末から返った位置情報の形式・時刻を確認できませんでした。':gpsError(error||lastError);const detail='［取得確認 v8.6.6：試行'+attempt+'回／応答'+responses+'回／古い位置'+stale+'回／形式・時刻不正'+invalid+'回／タイムアウト'+timeouts+'回／特定不可'+unavailable+'回'+(lastAge!==null?'／最終位置'+lastAge+'秒前':'')+'／画面'+initialVisibility+'→'+(document.visibilityState||'不明')+'］';resolve(best?{...best,locating:false}:{status:'error',error:reason+' '+detail,errorCode:(error||lastError)?.code||0})}
+  function finish(error){if(done)return;done=true;clearTimeout(deadline);clearTimeout(retryTimer);const reason=stale?'古い位置情報しか取得できなかったため、打刻位置を保存しませんでした。':invalid?'端末から返った位置情報の形式・時刻を確認できませんでした。':gpsError(error||lastError);const detail='［取得確認 v8.6.7：試行'+attempt+'回／応答'+responses+'回／古い位置'+stale+'回／形式・時刻不正'+invalid+'回／タイムアウト'+timeouts+'回／特定不可'+unavailable+'回'+(lastAge!==null?'／最終位置'+lastAge+'秒前':'')+'／画面'+initialVisibility+'→'+(document.visibilityState||'不明')+'］';resolve(best?{...best,locating:false}:{status:'error',error:reason+' '+detail,errorCode:(error||lastError)?.code||0})}
   function again(high,delay){if(!done)retryTimer=setTimeout(()=>request(high),delay)}
   function request(high){
     if(done)return;const token=++attempt;let settled=false;
