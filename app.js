@@ -399,9 +399,14 @@ function quickRangeComplete(start,end,calc){
 function quickDrivingWindow(calc,start,end){return calc.reduce((sum,r)=>sum+(r.segments||[]).filter(s=>s.type==='drive').reduce((n,s)=>n+overlapHours(s.start,s.end,start,end),0),0)}
 function quickTwoDay(day,calc){
   const pairs=day.records.map(r=>{
-    const t=+new Date(r.start),a=new Date(t-86400000),b=new Date(t+86400000),c=new Date(t+172800000);
-    const prev=quickDrivingWindow(calc,a,b)/2,next=quickDrivingWindow(calc,new Date(t),c)/2;
-    const prevDone=quickRangeComplete(a,b,calc),nextDone=quickRangeComplete(new Date(t),c,calc);
+    const previousKey=quickDateOffset(dateKey(r.start),-1);
+    const previous=calc.filter(x=>dateKey(x.start)===previousKey).sort((x,y)=>new Date(x.start)-new Date(y.start))[0];
+    // MHLW Q&A 3-6: the preceding window starts at the previous day's
+    // actual shift start, not 24 hours before this shift. Without that
+    // anchor, leave the preceding pair unknown; the next pair can settle it.
+    const t=+new Date(r.start),a=previous?new Date(previous.start):null,b=a?new Date(+a+172800000):null,c=new Date(t+172800000);
+    const prev=a?quickDrivingWindow(calc,a,b)/2:null,next=quickDrivingWindow(calc,new Date(t),c)/2;
+    const prevDone=!!a&&quickRangeComplete(a,b,calc),nextDone=quickRangeComplete(new Date(t),c,calc);
     return {prev,next,level:prev>9+RULE_EPS&&next>9+RULE_EPS?'bad':(prevDone&&prev<=9+RULE_EPS)||(nextDone&&next<=9+RULE_EPS)?'good':'pending'};
   });
   return {level:pairs.some(p=>p.level==='bad')?'bad':pairs.some(p=>p.level==='pending')?'pending':'good',pairs};

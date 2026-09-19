@@ -14,7 +14,7 @@ function quickModel(key,data){
   const before=d.records.map(r=>r.restBefore),after=d.records.map(r=>r.restAfter),rests=[...before,...after].filter(x=>x!=null);
   add('勤務間の休息',rests.some(h=>h<9-RULE_EPS)?'bad':rests.some(h=>h<11-RULE_EPS)?'warn':before.some(h=>h==null)||after.some(h=>h==null)?'pending':'good','勤務前 '+before.map(h=>h==null?'未確認':fmtHM(h)).join(' / ')+'・勤務後 '+after.map(h=>h==null?'次の始業待ち':fmtHM(h)).join(' / ')+'（基本11:00・最低9:00）');
   const two=quickTwoDay(d,calc);
-  add('2日平均の運転',two.level,two.pairs.map(p=>'前側 '+fmtHM(p.prev)+'・後側 '+fmtHM(p.next)).join(' / ')+' / 1日平均9:00以内。各始業を基準に前24時間～後24時間と始業～48時間を集計。未完了の範囲は暫定。');
+  add('2日平均の運転',two.level,two.pairs.map(p=>'前側 '+fmtHM(p.prev)+'・後側 '+fmtHM(p.next)).join(' / ')+' / 1日平均9:00以内。前日の始業から48時間と当日の始業から48時間を集計。前日記録なしは前側未確認、未完了の範囲は暫定。');
   const bs=biweekBlockStart(new Date(key+'T00:00:00'));
   if(bs){const be=new Date(+bs+14*86400000),drive=quickDrivingWindow(calc,bs,be);add('2週平均の運転',drive>88+RULE_EPS?'bad':quickRangeComplete(bs,be,calc)?'good':'pending',fmtHM(drive/2)+' / 週44:00（'+dateKey(bs)+' ～ '+dateKey(new Date(+be-1))+'、運転合計 '+fmtHM(drive)+'）')}
   else add('2週平均の運転','pending','設定で起算日を確認してください');
