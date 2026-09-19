@@ -1,0 +1,24 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict'),path=require('path');
+const data={},elements={};
+const ctx=vm.createContext({console,Date,Math,JSON,Map,Set,Number,String,Array,Object,Promise,URL,Blob,AbortController,setTimeout,clearTimeout,localStorage:{getItem:k=>data[k]??null,setItem:(k,v)=>data[k]=v,removeItem:k=>delete data[k]},document:{addEventListener(){},getElementById:id=>elements[id]??={value:'',dataset:{},querySelectorAll:()=>[]}},window:{},navigator:{},alert(){}});
+for(const f of ['app.js','quick-check.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,f),'utf8'),ctx);
+const run=s=>vm.runInContext(s,ctx);
+function record(id,start,parts){let t=+new Date(start);const segments=parts.map(([type,h])=>{const a=t;t+=h*3600000;return {type,start:new Date(a).toISOString(),end:new Date(t).toISOString()}});return {id,source:'punch',start,end:new Date(t).toISOString(),segments}}
+function use(rs){ctx.rs=rs;run('records=rs;live=null;settings.completeFrom="";settings.completeThrough=""')}
+function model(k='2026-08-12'){ctx.key=k;return run('quickModel(key,aggregateForMonth(key.slice(0,7)))')}
+function row(name,k){return model(k).rows.find(r=>r.title===name)}
+let passed=0;function test(name,fn){fn();passed++;console.log('PASS '+name)}
+test('empty history remains pending',()=>{use([]);assert.equal(model().level,'pending')});
+test('missing days never count as confirmed zero-driving history',()=>{use([record('a','2026-08-12T08:00:00',[['drive',4]])]);assert.equal(row('2日平均の運転').level,'pending');assert.equal(row('月間拘束').level,'pending')});
+test('confirmed history can settle a finished 48-hour pair',()=>{run('settings.completeFrom="2026-08-01";settings.completeThrough="2026-08-31"');assert.equal(row('2日平均の運転').level,'good')});
+test('exact four-hour boundary and one-second excess',()=>{use([record('a','2026-08-12T08:00:00',[['drive',4]])]);assert.equal(row('連続運転・運転中断').level,'good');use([record('a','2026-08-12T08:00:00',[['drive',4+1/3600]])]);assert.equal(row('連続運転・運転中断').level,'bad')});
+test('thirteen/fifteen hour restraint boundaries',()=>{for(const [h,want] of [[13,'good'],[13+1/3600,'warn'],[15,'warn'],[15+1/3600,'bad']]){use([record('a','2026-08-12T00:00:00',[['other',h]])]);assert.equal(row('1日の拘束').level,want)}});
+test('rest boundary at nine hours and one second under',()=>{for(const [gap,want] of [[9,'warn'],[9-1/3600,'bad'],[11,'pending']]){const t=+new Date('2026-08-11T18:00:00')+gap*3600000;use([record('a','2026-08-11T08:00:00',[['other',10]]),record('b',new Date(t).toISOString(),[['other',1]])]);assert.equal(row('勤務間の休息').level,want)}});
+test('48-hour windows clip overnight driving instead of adding start-date totals',()=>{use([record('a','2026-08-11T23:00:00',[['drive',4]]),record('b','2026-08-12T08:00:00',[['drive',4]]),record('c','2026-08-13T23:00:00',[['drive',12]])]);const d=run('aggregateForMonth("2026-08").daily.get("2026-08-12")');assert.equal(d.twoDayPrev,4);assert.equal(d.twoDayNext,6.5)});
+test('both 48-hour averages exceeding nine is bad',()=>{use([record('a','2026-08-11T08:00:00',[['drive',10]]),record('b','2026-08-12T08:00:00',[['drive',10]]),record('c','2026-08-13T08:00:00',[['drive',10]])]);assert.equal(row('2日平均の運転').level,'bad')});
+test('biweek boundary clips a crossing shift',()=>{use([record('a','2026-08-16T22:00:00',[['drive',4]])]);run('settings.biweekStart="2026-08-03"');assert.equal(run('aggregateForMonth("2026-08").daily.get("2026-08-16").biweekDrive'),2)});
+test('unfinished periods stay pending despite coverage claim',()=>{use([record('a',run('dateKey(new Date())')+'T00:00:00',[['other',1]])]);run('settings.completeFrom="2026-01-01";settings.completeThrough=dateKey(new Date())');assert.equal(row('年間拘束',run('dateKey(new Date())')).level,'pending')});
+test('exception checkbox never silently relaxes limits',()=>{use([record('a','2026-08-12T00:00:00',[['other',16]])]);run('records[0].checkConditions={longDistance:true,unforeseen:false,note:"450km"}');assert.equal(model().flags,true);assert.equal(row('1日の拘束').level,'bad');assert.equal(row('特例条件').level,'pending')});
+test('conditions survive backup validation and malformed values rejected',()=>{assert.equal(run('validateBackup({records,settings}).records[0].checkConditions.note'),'450km');assert.throws(()=>run('validateCheckConditions({longDistance:"yes",unforeseen:false,note:""})'));assert.throws(()=>run('validateSettings({...settings,completeFrom:"2026-02-30",completeThrough:"2026-03-01"})'))});
+test('failed condition save leaves memory and storage unchanged',()=>{run('$("checkDate").value="2026-08-12";loadQuickConditions("2026-08-12");$("checkNote").value="unsaved";localStorage.setItem=()=>{throw Error("quota")};saveQuickConditions()');assert.equal(run('records[0].checkConditions.note'),'450km');assert.match(run('$("checkSaveStatus").textContent'),/保存できません/)});
+console.log(passed+' quick-check tests passed');
