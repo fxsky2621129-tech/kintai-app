@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0f172a">
   <meta name="description" content="トラック運転者向けの勤怠・改善基準チェックPWA">
-  <title>運送業 勤怠・改善基準チェッカー v8.7.0</title>
+  <title>運送業 勤怠・改善基準チェッカー v8.8.0</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="style.css?v=8.7.0">
+  <link rel="stylesheet" href="style.css?v=8.8.0">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -17,12 +17,27 @@
 <body>
 <header>
   <div class="header-row">
-    <div><h1>🚚 勤怠・改善基準チェッカー <small>v8.7.0</small></h1><p>ワンタップ打刻・GPS・月間集計・改善基準チェック</p></div>
+    <div><h1>🚚 勤怠・改善基準チェッカー <small>v8.8.0</small></h1><p>ワンタップ打刻・GPS・月間集計・改善基準チェック</p></div>
     <div id="liveClock" class="clock">--</div>
   </div>
 </header>
 <main>
   <nav class="app-nav no-print" aria-label="アプリ内移動"><a href="#statusCard">勤怠打刻</a><a href="#lawGuide">法改正 虎の巻</a><a href="#dataProtection">保存・インストール</a></nav>
+  <section class="card no-print quick-check" id="quickCheck" aria-labelledby="quickTitle">
+    <div class="law-heading"><div><span class="law-eyebrow">打刻から自動計算</span><h2 id="quickTitle">今日の運行チェック</h2></div><button id="checkToday" class="btn soft">今日に戻る</button></div>
+    <label>確認する日<input type="date" id="checkDate"></label>
+    <div id="checkResult"></div>
+    <details id="checkConditions"><summary>この勤務の特例・確認メモ</summary>
+      <label class="law-confirm"><input id="checkLongDistance" type="checkbox">宿泊を伴う長距離運行</label>
+      <p class="hint">週の全運行が450km以上・住所地以外での休息が条件です。拘束16時間／休息8時間の特例は各週2回まで。9時間未満の休息を取った運行の終了後は12時間以上の休息が必要です。このチェックだけでは適用を確定しません。</p>
+      <label class="law-confirm"><input id="checkUnforeseen" type="checkbox">予期し得ない事象あり</label>
+      <label>確認メモ<textarea id="checkNote" maxlength="2000" rows="3" placeholder="運行距離、宿泊場所、事象の発生時刻、証拠の保存先など"></textarea></label>
+      <p class="hint">対応時間は自動控除しません。客観的記録と対象時間を確認してください。月・年・2週平均からは控除できません。複数勤務の日は、直近の勤務に保存します。</p>
+      <button id="saveCheckConditions" class="btn primary">条件・メモを保存</button><p id="checkSaveStatus" role="status"></p>
+    </details>
+    <p class="hint">通常基準による簡易チェックです。未記録・集計中・特例条件の未確認は「判定待ち」と表示します。<a href="https://driver-roudou-jikan.mhlw.go.jp/truck/notice" target="_blank" rel="noopener noreferrer">厚生労働省の基準</a></p>
+  </section>
+  <section class="card no-print" id="quickWeek"><h2>週間チェック</h2><div id="checkWeek"></div></section>
   <section class="card no-print" id="statusCard">
     <div class="status-grid">
       <div><span>勤務状態</span><strong id="shiftState">未始業</strong></div>
@@ -64,7 +79,7 @@
   </section>
 
   <section class="card no-print">
-    <h2>設定</h2>
+    <h2 id="checkSettings">設定</h2>
     <div class="settings-grid">
       <label>基礎時給（円）<input id="hourlyRate" type="number" min="0" step="1"></label>
       <label>所定開始<input id="scheduledStart" type="time"></label>
@@ -72,11 +87,12 @@
       <label>1日の所定実働（時間）<input id="dailyStandardHours" type="number" min="1" max="12" step="0.25"></label>
       <label>2週平均の起算日<input id="biweekStart" type="date"></label>
     </div>
+    <details><summary>集計の入力完了期間</summary><p class="hint">この期間内の勤務をすべて入力済み（記録のない日は休日・運転なし）と確認できる範囲を指定してください。未指定の期間は、累計が上限内でも適合を確定しません。月・年は始業日で集計し、年は1月～12月です。</p><div class="settings-grid"><label>入力完了：開始日<input id="completeFrom" type="date"></label><label>入力完了：終了日<input id="completeThrough" type="date"></label></div></details>
     <button id="saveSettingsBtn" class="btn primary">設定を保存</button>
     <p class="hint">残業代は入力した基礎時給から概算します。勤務は始業日の実働・休憩を合算します（日跨ぎ勤務も始業日に計上）。概算時間外等は時間外賃金と全深夜時間の割増分です。会社の賃金規程・固定残業・歩合給等がある場合は別途確認が必要です。</p>
   </section>
 
-  <section class="card monthly-card">
+  <section class="card monthly-card" id="checkMonth">
     <div class="toolbar no-print"><div><label>表示月<input id="monthPicker" type="month"></label></div><button id="refreshBtn" class="btn soft">集計更新</button><button id="csvBtn" class="btn soft">CSV出力</button><button id="printBtn" class="btn soft">PDF/印刷</button></div>
     <h2>月間勤務表</h2>
     <div id="monthSummary" class="summary-grid"></div>
@@ -111,10 +127,12 @@
 
   <section class="card rules-card no-print">
     <h2>改善基準チェック（通常ルール・厳格確認）</h2>
-    <p class="hint">2024年4月適用のトラック運転者の改善基準告示を参考にした補助判定です。通常ルールとして、1日13時間、最大15時間、休息11時間を基本・9時間未満不可、2日平均1日9時間、2週平均1週44時間、連続運転4時間を確認します。宿泊を伴う長距離貨物運送、フェリー、2人乗務、予期し得ない事象などの例外は自動適用しません。休憩以外の運転中断や10分未満の中断は要確認として表示します。10分未満の休憩が3回以上続く場合は違反表示します。運転の中断は休憩のみを算入し、荷役・待機等ではリセットしません（厳格判定）。同日の複数勤務や短い勤務間隔でも連続運転を引き継ぎます。月284時間・暦年3300時間を超えた日以降は累計超過を表示します。14時間超が週3回以上、または連日の場合は注意表示します（週は月～日）。13時間超の拘束・9時間以上11時間未満の休息は注意として区別します。総合欄に該当する違反・注意・判定待ちをすべて表示します。記録のない日は0時間として集計します。</p>
+    <p class="hint">2024年4月適用のトラック運転者の改善基準告示を参考にした補助判定です。通常ルールとして、1日13時間、最大15時間、休息11時間を基本・9時間未満不可、2日平均1日9時間、2週平均1週44時間、連続運転4時間を確認します。宿泊を伴う長距離貨物運送、フェリー、2人乗務、予期し得ない事象などの例外は自動適用しません。休憩以外の運転中断や10分未満の中断は要確認として表示します。10分未満の休憩が3回以上続く場合は違反表示します。運転の中断は休憩のみを算入し、荷役・待機等ではリセットしません（厳格判定）。同日の複数勤務や短い勤務間隔でも連続運転を引き継ぎます。月284時間・暦年3300時間を超えた日以降は累計超過を表示します。14時間超が週3回以上、または連日の場合は注意表示します（週は月～日）。13時間超の拘束・9時間以上11時間未満の休息は注意として区別します。総合欄に該当する違反・注意・判定待ちをすべて表示します。記録のない日は累計に加算しません。2日・2週の適合確定には、設定で入力完了期間の確認が必要です。2日平均は始業を基準とする48時間、2週平均は起算日から14日間に重なる運転区間を集計します。</p>
   </section>
 </main>
-<script src="law-guide.js?v=8.7.0" defer></script>
-<script src="app.js?v=8.7.0" defer></script>
+<script src="law-guide.js?v=8.8.0" defer></script>
+<script src="app.js?v=8.8.0" defer></script>
+<script src="quick-check.js?v=8.8.0" defer></script>
+<nav class="quick-nav no-print" aria-label="クイック移動"><a href="#quickCheck">今日</a><a href="#quickWeek">週間</a><a href="#checkMonth">月間</a><a href="#checkSettings">設定</a></nav>
 </body>
 </html>

@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION='8.7.0';
+const APP_VERSION='8.8.0';
 const KEYS={
   lawChecks:'truck_kintai_v8_law_checks',
   records:'truck_kintai_v8_records',
@@ -313,7 +313,10 @@ function restAfter(r,sorted){const i=sorted.findIndex(x=>x.id===r.id);if(i<0||i=
 function dailyMap(calc,month){const map=new Map();for(const r of calc){if(month&&monthKey(r.startD)!==month)continue;const k=dateKey(r.startD);if(!map.has(k))map.set(k,{date:k,records:[],duration:0,work:0,by:{drive:0,wait:0,load:0,unload:0,break:0,other:0},maxContinuous:0,rolling24:0,breakShort:0,level:'good',returnMemo:[],outboundMemo:[]});const d=map.get(k);d.records.push(r);d.duration+=r.duration;d.work+=r.work;for(const t of Object.keys(d.by))d.by[t]+=r.by[t]||0;d.maxContinuous=Math.max(d.maxContinuous,r.maxContinuous);d.rolling24=Math.max(d.rolling24,r.rolling24);d.breakShort=Math.max(d.breakShort,r.breakShort);if(r.level==='bad')d.level='bad';else if(r.level==='warn'&&d.level==='good')d.level='warn';if(r.returnMemo)d.returnMemo.push(r.returnMemo);if(r.outboundMemo)d.outboundMemo.push(r.outboundMemo)}return map}
 
 function biweekBlockStart(date){const base=new Date(settings.biweekStart+'T00:00:00');if(Number.isNaN(+base))return null;const days=Math.floor((new Date(dateKey(date)+'T00:00:00')-base)/86400000);const n=Math.floor(days/14);return new Date(base.getTime()+n*14*86400000)}
-function applyBiweek(daily,allDaily){for(const [k,d] of daily){const bs=biweekBlockStart(new Date(k+'T00:00:00'));if(!bs){d.biweek='pending';continue}const be=new Date(bs.getTime()+14*86400000);let drive=0;for(const [ak,ad] of allDaily){const dt=new Date(ak+'T00:00:00');if(dt>=bs&&dt<be)drive+=ad.by.drive}d.biweekDrive=drive;const complete=be<=new Date();d.biweek=drive>88+1e-6?'bad':complete?'good':'pending'}}
+function applyBiweek(daily,allDaily){
+  const calc=[...allDaily.values()].flatMap(d=>d.records);
+  for(const [k,d] of daily){const bs=biweekBlockStart(new Date(k+'T00:00:00'));if(!bs){d.biweek='pending';continue}const be=new Date(bs.getTime()+14*86400000),drive=quickDrivingWindow(calc,bs,be);d.biweekDrive=drive;d.biweek=drive>88+RULE_EPS?'bad':quickRangeComplete(bs,be,calc)?'good':'pending'}
+}
 
 
 const RULE_EPS=1e-9;
@@ -388,13 +391,32 @@ function calcRecords(list){
     c.issues=recordIssues(c);c.level=issuesLevel(c.issues);return c;
   });
 }
+function quickDateOffset(key,n){const d=new Date(key+'T00:00:00');d.setDate(d.getDate()+n);return dateKey(d)}
+function quickCovered(from,through){return !!settings.completeFrom&&!!settings.completeThrough&&settings.completeFrom<=from&&settings.completeThrough>=through}
+function quickRangeComplete(start,end,calc){
+  return +end<=Date.now()&&quickCovered(dateKey(start),dateKey(new Date(+end-1)))&&!calc.some(r=>r.isLive&&overlapHours(r.start,r.end,start,end)>0);
+}
+function quickDrivingWindow(calc,start,end){return calc.reduce((sum,r)=>sum+(r.segments||[]).filter(s=>s.type==='drive').reduce((n,s)=>n+overlapHours(s.start,s.end,start,end),0),0)}
+function quickTwoDay(day,calc){
+  const pairs=day.records.map(r=>{
+    const previousKey=quickDateOffset(dateKey(r.start),-1);
+    const previous=calc.filter(x=>dateKey(x.start)===previousKey).sort((x,y)=>new Date(x.start)-new Date(y.start))[0];
+    // MHLW Q&A 3-6: the preceding window starts at the previous day's
+    // actual shift start, not 24 hours before this shift. Without that
+    // anchor, leave the preceding pair unknown; the next pair can settle it.
+    const t=+new Date(r.start),a=previous?new Date(previous.start):null,b=a?new Date(+a+172800000):null,c=new Date(t+172800000);
+    const prev=a?quickDrivingWindow(calc,a,b)/2:null,next=quickDrivingWindow(calc,new Date(t),c)/2;
+    const prevDone=!!a&&quickRangeComplete(a,b,calc),nextDone=quickRangeComplete(new Date(t),c,calc);
+    return {prev,next,level:prev>9+RULE_EPS&&next>9+RULE_EPS?'bad':(prevDone&&prev<=9+RULE_EPS)||(nextDone&&next<=9+RULE_EPS)?'good':'pending'};
+  });
+  return {level:pairs.some(p=>p.level==='bad')?'bad':pairs.some(p=>p.level==='pending')?'pending':'good',pairs};
+}
 function applyTwoDay(daily,allDaily){
-  const todayEnd=new Date();todayEnd.setHours(0,0,0,0);
-  for(const [k,d] of daily){
-    const dt=new Date(k+'T00:00:00'),pd=new Date(dt),nd=new Date(dt),ne=new Date(dt);pd.setDate(pd.getDate()-1);nd.setDate(nd.getDate()+1);ne.setDate(ne.getDate()+2);
-    const a=((allDaily.get(dateKey(pd))?.by.drive||0)+d.by.drive)/2,b=(d.by.drive+(allDaily.get(dateKey(nd))?.by.drive||0))/2;
-    d.twoDayPrev=a;d.twoDayNext=b;
-    d.twoDay=a>9+RULE_EPS&&b>9+RULE_EPS?'bad':a<=9+RULE_EPS||ne<=todayEnd?'good':'pending';
+  const calc=[...allDaily.values()].flatMap(d=>d.records);
+  for(const d of daily.values()){
+    const result=quickTwoDay(d,calc);d.twoDay=result.level;
+    const pair=result.pairs.find(p=>p.level==='bad')||result.pairs.find(p=>p.level==='pending')||result.pairs[0];
+    d.twoDayPrev=pair.prev;d.twoDayNext=pair.next;
   }
 }
 function weekKey(date){const d=new Date(date+'T00:00:00');d.setDate(d.getDate()-(d.getDay()+6)%7);return dateKey(d)}
@@ -408,9 +430,9 @@ function aggregateForMonth(month){
     d.monthRestraint=months.get(m);d.yearRestraint=years.get(year);
     const shared=[];
     if(d.twoDay==='bad')shared.push(issue('two-day','bad','2日平均運転：前日組 '+fmtRuleHours(d.twoDayPrev)+'・翌日組 '+fmtRuleHours(d.twoDayNext)+'（両方9:00超）'));
-    else if(d.twoDay==='pending')shared.push(issue('two-day-pending','pending','2日平均運転は翌日終了後に確定'));
+    else if(d.twoDay==='pending')shared.push(issue('two-day-pending','pending','2日平均運転は48時間の対象期間と入力完了期間の確認後に確定'));
     if(d.biweek==='bad')shared.push(issue('biweek','bad','2週間の運転 '+fmtRuleHours(d.biweekDrive)+'（上限88:00）'));
-    else if(d.biweek==='pending')shared.push(issue('biweek-pending','pending','2週間の運転は対象期間の終了後に確定'));
+    else if(d.biweek==='pending')shared.push(issue('biweek-pending','pending','2週間の運転は対象期間の終了・入力完了確認後に確定'));
     if(d.monthRestraint>284+RULE_EPS)shared.push(issue('month','bad','月間拘束累計 '+fmtRuleHours(d.monthRestraint)+'（通常上限284:00）'));
     if(d.yearRestraint>3300+RULE_EPS)shared.push(issue('year','bad','年間拘束累計 '+fmtRuleHours(d.yearRestraint)+'（暦年・通常上限3300:00）'));
     const weekly=weekCounts.get(weekKey(key))||0;
@@ -434,7 +456,7 @@ function renderClock(){const d=new Date();$('liveClock').textContent=`${d.getFul
 function renderStatus(){const now=localIso();$('shiftState').textContent=live?'勤務中':'未始業';$('shiftStartText').textContent=live?fmtDateTime(live.start):'-';$('activeTypeText').textContent=live?.active?TYPES[live.active.type]:'-';$('elapsedText').textContent=live?fmtHM(hoursBetween(live.start,now)):'0:00';$('startShiftBtn').disabled=!!live;$('endShiftBtn').disabled=!live;const latest=[...records].reverse().find(r=>r.source==='punch');const sg=live?.startGps||latest?.startGps,eg=live?null:latest?.endGps;$('startGpsText').textContent=startGpsDisplay(sg);$('startGpsText').className=gpsClass(sg);$('endGpsText').textContent=live?'勤務中（終業時に取得）':gpsDisplay(eg);$('endGpsText').className=gpsClass(eg);$('retryStartGpsBtn').disabled=!(live||latest)||gpsRequests.has((live||latest)?.id+':startGps');$('retryEndGpsBtn').disabled=!!live||!latest||gpsRequests.has(latest?.id+':endGps')}
 function renderActivities(){const root=$('activityButtons');root.innerHTML='';for(const [type,name] of Object.entries(TYPES)){if(type==='drive')continue;const div=document.createElement('div');div.className='activity-card';div.innerHTML=`<b>${name}</b><div class="pair"><button class="btn start" data-start="${type}">開始</button><button class="btn end" data-end="${type}">終了</button></div>`;root.appendChild(div)}root.querySelectorAll('[data-start]').forEach(b=>{b.disabled=!live;b.onclick=()=>startActivity(b.dataset.start)});root.querySelectorAll('[data-end]').forEach(b=>{b.disabled=!live?.active||live.active.type!==b.dataset.end;b.onclick=()=>endActivity(b.dataset.end)});const tl=$('liveTimeline');if(!live){tl.innerHTML='<p class="hint">始業開始と同時に運転時間の計測を開始します。</p>';return}let rows=(live.segments||[]).map(s=>`<div class="timeline-row"><span>${escapeHtml(TYPES[s.type])}</span><span>${fmtTime(s.start)} ～ ${fmtTime(s.end)}</span><span>${fmtHM(hoursBetween(s.start,s.end))}</span></div>`).join('');if(live.active)rows+=`<div class="timeline-row"><span>${escapeHtml(TYPES[live.active.type])}</span><span class="running">${fmtTime(live.active.start)} ～ 継続中</span><span>${fmtHM(hoursBetween(live.active.start,localIso()))}</span></div>`;tl.innerHTML=rows||'<p class="hint">始業開始と同時に運転時間の計測を開始します。</p>'}
 function renderRest(){if(restState?.start){$('restStatus').textContent=`休息中：${fmtDateTime(restState.start)} ～（${fmtHM(hoursBetween(restState.start,localIso()))}）`;$('restStartBtn').disabled=true;$('restEndBtn').disabled=false}else{const last=restLog.at(-1);$('restStatus').textContent=last?`前回：${fmtDateTime(last.start)} ～ ${fmtDateTime(last.end)}（${fmtHM(hoursBetween(last.start,last.end))}）`:'休息記録なし';$('restStartBtn').disabled=!!live;$('restEndBtn').disabled=true}}
-function renderSettings(){$('hourlyRate').value=settings.hourlyRate;$('scheduledStart').value=settings.scheduledStart;$('scheduledEnd').value=settings.scheduledEnd;$('dailyStandardHours').value=settings.dailyStandardHours;$('biweekStart').value=settings.biweekStart}
+function renderSettings(){$('hourlyRate').value=settings.hourlyRate;$('scheduledStart').value=settings.scheduledStart;$('scheduledEnd').value=settings.scheduledEnd;$('dailyStandardHours').value=settings.dailyStandardHours;$('biweekStart').value=settings.biweekStart;if($('completeFrom'))$('completeFrom').value=settings.completeFrom||'';if($('completeThrough'))$('completeThrough').value=settings.completeThrough||''}
 function renderSummary(daily){let work=0,drive=0,ot=0,pay=0,restraint=0,bad=0,over14=0;for(const d of daily.values()){work+=d.work;drive+=d.by.drive;ot+=d.ot;pay+=d.pay;restraint+=d.duration;if(d.level==='bad')bad++;if(d.rolling24>14+1e-6)over14++}const rem=284-restraint;const data=[['拘束時間',fmtHM(restraint)],['実働',fmtHM(work)],['運転',fmtHM(drive)],['時間外',fmtHM(ot)],['概算時間外等',`${Math.round(pay).toLocaleString()}円`],[rem>=0?'284h残り':'284h超過',fmtHM(Math.abs(rem))],['14h超日',`${over14}日`],['違反日',`${bad}日`]];$('monthSummary').innerHTML=data.map(x=>`<div class="summary-item"><span>${x[0]}</span><strong>${x[1]}</strong></div>`).join('')}
 function renderMonth(){const month=$('monthPicker').value||nowMonth();$('monthPicker').value=month;const {daily}=aggregateForMonth(month),[y,m]=month.split('-').map(Number),days=new Date(y,m,0).getDate(),body=$('monthBody');body.innerHTML='';for(let day=1;day<=days;day++){const k=`${y}-${pad(m)}-${pad(day)}`,d=daily.get(k),dt=new Date(y,m-1,day);const tr=document.createElement('tr');if(d?.level==='bad')tr.className='row-bad';else if(d?.level==='warn')tr.className='row-warn';if(!d){tr.innerHTML=`<td>${day}</td><td>${dayLabel(dt)}</td>${'<td></td>'.repeat(23)}`;body.appendChild(tr);continue}const starts=d.records.map(r=>fmtTime(r.start)).join('<br>'),ends=d.records.map(r=>fmtTime(r.end)).join('<br>'),sg=d.records.map(r=>escapeHtml(gpsDisplay(r.startGps))).join('<br>'),eg=d.records.map(r=>escapeHtml(gpsDisplay(r.endGps))).join('<br>'),rest=d.records.map(r=>r.restAfter===null?'判定待ち':r.restAfter<9?`違反 ${fmtHM(r.restAfter)}`:r.restAfter<11?`注意 ${fmtHM(r.restAfter)}`:`適合 ${fmtHM(r.restAfter)}`).join('<br>');tr.innerHTML=`<td>${day}</td><td>${dayLabel(dt)}</td><td>${starts}</td><td class="wrap gps-cell">${sg}</td><td>${ends}</td><td class="wrap gps-cell">${eg}</td><td>${fmtHM(d.duration)}</td><td>${fmtHM(d.work)}</td><td>${fmtHM(d.by.drive)}</td><td>${fmtHM(d.by.wait)}</td><td>${fmtHM(d.by.load)}</td><td>${fmtHM(d.by.unload)}</td><td>${fmtHM(d.by.break)}</td><td>${fmtHM(d.by.other)}</td><td>${fmtHM(d.ot)}</td><td>${fmtHM(d.night)}</td><td>${Math.round(d.pay).toLocaleString()}円</td><td>${d.breakShort>0?`不足${Math.round(d.breakShort*60)}分`:'適合'}</td><td>${d.rolling24>15?'違反':d.rolling24>13?'注意':'適合'} ${fmtHM(d.rolling24)}</td><td>${rest}</td><td>${twoDayText(d.twoDay)}</td><td>${biweekText(d)}</td><td class="wrap overall-cell">${levelBadge(d.level)}${issuesHtml(d.issues)}</td><td class="wrap">${escapeHtml(d.returnMemo.join(' / '))}</td><td class="wrap">${escapeHtml(d.outboundMemo.join(' / '))}</td>`;body.appendChild(tr)}renderSummary(daily)}
 function renderHistory(){
@@ -455,7 +477,7 @@ function renderHistory(){
   }
 }
 function renderAppStatus(){$('appStatus').textContent=`${navigator.onLine?'オンライン':'オフライン'} ／ v${APP_VERSION} ／ データ保存先：この端末のブラウザ`}
-function renderAll(){renderStatus();renderActivities();renderRest();renderMonth();renderHistory();renderAppStatus()}
+function renderAll(){if(typeof renderQuickCheck==='function')renderQuickCheck();renderStatus();renderActivities();renderRest();renderMonth();renderHistory();renderAppStatus()}
 
 window.retryRecordStart=async id=>retryGps(id,'startGps');
 window.retryRecordEnd=async id=>setEndGpsForRecord(id);
@@ -463,8 +485,8 @@ window.deleteRecord=id=>{if(!confirm('この勤務記録を削除しますか？
 
 function saveSettings(){
   try{
-    const candidate=validateSettings({hourlyRate:Number($('hourlyRate').value),scheduledStart:$('scheduledStart').value,scheduledEnd:$('scheduledEnd').value,dailyStandardHours:Number($('dailyStandardHours').value),biweekStart:$('biweekStart').value});
-    store(KEYS.settings,candidate);settings=candidate;renderMonth();alert('設定を保存しました');
+    const candidate=validateSettings({hourlyRate:Number($('hourlyRate').value),scheduledStart:$('scheduledStart').value,scheduledEnd:$('scheduledEnd').value,dailyStandardHours:Number($('dailyStandardHours').value),biweekStart:$('biweekStart').value,completeFrom:$('completeFrom')?.value||'',completeThrough:$('completeThrough')?.value||''});
+    store(KEYS.settings,candidate);settings=candidate;renderAll();alert('設定を保存しました');
   }catch(e){alert('設定を保存できません：'+e.message)}
 }
 function exportCsv(){const month=$('monthPicker').value||nowMonth(),{daily}=aggregateForMonth(month),[y,m]=month.split('-').map(Number),days=new Date(y,m,0).getDate();const out=[['日付','曜日','出勤','開始場所','開始精度m','退勤','終了場所','終了精度m','拘束','実働','運転','待機','荷積','荷卸','休憩','その他','時間外','深夜','概算時間外等円','休憩判定','24h拘束','休息','2日平均','2週平均','総合','復路','往路']];for(let day=1;day<=days;day++){const k=`${y}-${pad(m)}-${pad(day)}`,d=daily.get(k),dt=new Date(y,m-1,day);if(!d){out.push([k,dayLabel(dt),...Array(25).fill('')]);continue}const sg=d.records.map(r=>r.startGps||{}),eg=d.records.map(r=>r.endGps||{});out.push([k,dayLabel(dt),d.records.map(r=>fmtTime(r.start)).join('/'),sg.map(g=>startGpsDisplay(g)).join(' / '),sg.map(g=>g.accuracy??'').join('/'),d.records.map(r=>fmtTime(r.end)).join('/'),eg.map(g=>gpsDisplay(g)).join(' / '),eg.map(g=>g.accuracy??'').join('/'),fmtHM(d.duration),fmtHM(d.work),fmtHM(d.by.drive),fmtHM(d.by.wait),fmtHM(d.by.load),fmtHM(d.by.unload),fmtHM(d.by.break),fmtHM(d.by.other),fmtHM(d.ot),fmtHM(d.night),Math.round(d.pay),d.breakShort>0?`不足${Math.round(d.breakShort*60)}分`:'適合',`${d.rolling24>15?'違反':d.rolling24>13?'注意':'適合'} ${fmtHM(d.rolling24)}`,d.records.map(r=>r.restAfter===null?'判定待ち':fmtHM(r.restAfter)).join('/'),twoDayText(d.twoDay),biweekText(d),[d.level==='bad'?'違反':d.level==='warn'?'注意':d.level==='pending'?'判定待ち':'適合',issuesText(d.issues)].filter(Boolean).join('\n'),d.returnMemo.join(' / '),d.outboundMemo.join(' / ')])}downloadBlob('\uFEFF'+out.map(r=>r.map(csvCell).join(',')).join('\r\n'),`kintai_${month}.csv`,'text/csv;charset=utf-8')}
@@ -489,6 +511,10 @@ function validateLawChecks(value){
   }
   return clean;
 }
+function validateCheckConditions(value){
+  if(!value||typeof value!=='object'||Array.isArray(value)||typeof value.longDistance!=='boolean'||typeof value.unforeseen!=='boolean'||typeof value.note!=='string'||value.note.length>2000)throw new Error('運行条件・メモが不正です');
+  return {longDistance:value.longDistance,unforeseen:value.unforeseen,note:value.note};
+}
 function validateSettings(value){
   if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('設定形式が違います');
   const s={hourlyRate:value.hourlyRate,scheduledStart:value.scheduledStart,scheduledEnd:value.scheduledEnd,dailyStandardHours:value.dailyStandardHours,biweekStart:value.biweekStart};
@@ -496,6 +522,10 @@ function validateSettings(value){
   if(!Number.isFinite(s.dailyStandardHours)||s.dailyStandardHours<1||s.dailyStandardHours>12)throw new Error('所定実働が不正です');
   if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.scheduledStart)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.scheduledEnd)||s.scheduledStart===s.scheduledEnd)throw new Error('所定開始・終了を異なる有効な時刻にしてください');
   if(!/^\d{4}-\d{2}-\d{2}$/.test(s.biweekStart)||!validTimestamp(s.biweekStart+'T00:00:00'))throw new Error('起算日が不正です');
+  s.completeFrom=value.completeFrom||'';s.completeThrough=value.completeThrough||'';
+  if(s.completeFrom||s.completeThrough){
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(s.completeFrom)||!/^\d{4}-\d{2}-\d{2}$/.test(s.completeThrough)||!validTimestamp(s.completeFrom+'T00:00:00')||!validTimestamp(s.completeThrough+'T00:00:00')||s.completeFrom>s.completeThrough||s.completeThrough>dateKey(new Date()))throw new Error('入力完了期間は実在する日付で、開始日から今日までの範囲を指定してください');
+  }
   return s;
 }
 function validTimestamp(v){
@@ -550,6 +580,7 @@ function validateBackup(input){
     for(const k of ['returnPref','returnCity','returnExtra','outPref','outCity','outExtra','returnMemo','outboundMemo']){
       if(r[k]!=null&&(typeof r[k]!=='string'||r[k].length>10000))fail('運行メモが不正です');out[k]=r[k]||'';
     }
+    if(r.checkConditions!=null)out.checkConditions=validateCheckConditions(r.checkConditions);
     out.startGps=gps(r.startGps);out.endGps=gps(r.endGps);return out;
   }
   const candidate={records:input.records.map(r=>shift(r)),settings:validateSettings({...settings,...(input.settings||{})}),live:input.live==null?null:shift(input.live,true),restState:null,restLog:[]};
@@ -611,6 +642,6 @@ function initPwa(){
     try{await r.update()}catch(e){if(!r.active)status.textContent='オフライン準備を完了できませんでした。通信状態を確認してください。'}
   }).catch(()=>{status.textContent='オフライン準備に失敗しました。HTTPS・通信状態・保存設定を確認してください。'});
 }
-async function init(){migrateLegacy();ensureAutoDriveLive();if(live&&restState)finishRestAt(live.start);recoverPendingGps();$('monthPicker').value=nowMonth();renderSettings();bind();const routes=initRouteSelectors();renderAll();renderClock();setInterval(()=>{renderClock();if(live){renderStatus();renderActivities()}if(restState)renderRest()},1000);setInterval(()=>{if(live)renderMonth()},15000);initPwa();await routes;void retryMissingAddresses()}
+async function init(){migrateLegacy();ensureAutoDriveLive();if(live&&restState)finishRestAt(live.start);recoverPendingGps();$('monthPicker').value=nowMonth();renderSettings();bind();const routes=initRouteSelectors();renderAll();renderClock();setInterval(()=>{renderClock();if(live){renderStatus();renderActivities()}if(restState)renderRest()},1000);setInterval(()=>{if(live)renderMonth();if(typeof renderQuickCheck==='function')renderQuickCheck(false)},15000);initPwa();await routes;void retryMissingAddresses()}
 
 document.addEventListener('DOMContentLoaded',init);
