@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0f172a">
   <meta name="description" content="トラック運転者向けの勤怠・改善基準チェックPWA">
-  <title>運送業 勤怠・改善基準チェッカー v8.6.7</title>
+  <title>運送業 勤怠・改善基準チェッカー v8.7.0</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="style.css?v=8.6.7">
+  <link rel="stylesheet" href="style.css?v=8.7.0">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -17,11 +17,12 @@
 <body>
 <header>
   <div class="header-row">
-    <div><h1>🚚 勤怠・改善基準チェッカー <small>v8.6.7</small></h1><p>ワンタップ打刻・GPS・月間集計・改善基準チェック</p></div>
+    <div><h1>🚚 勤怠・改善基準チェッカー <small>v8.7.0</small></h1><p>ワンタップ打刻・GPS・月間集計・改善基準チェック</p></div>
     <div id="liveClock" class="clock">--</div>
   </div>
 </header>
 <main>
+  <nav class="app-nav no-print" aria-label="アプリ内移動"><a href="#statusCard">勤怠打刻</a><a href="#lawGuide">法改正 虎の巻</a><a href="#dataProtection">保存・インストール</a></nav>
   <section class="card no-print" id="statusCard">
     <div class="status-grid">
       <div><span>勤務状態</span><strong id="shiftState">未始業</strong></div>
@@ -37,7 +38,7 @@
       <div class="gps-box"><span>📍 始業GPS</span><strong id="startGpsText">未取得</strong><button id="retryStartGpsBtn" class="btn soft small">再取得</button></div>
       <div class="gps-box"><span>🏁 終業GPS</span><strong id="endGpsText">未取得</strong><button id="retryEndGpsBtn" class="btn soft small">再取得</button></div>
     </div>
-    <p class="hint">始業・終業の打刻はすぐ保存します。位置は最大60秒測位し、座標を先に保存して住所を後から補完します。画面を開いたままお待ちください。再取得時、座標が保存済みなら住所だけを更新します。</p>
+    <p class="hint">始業・終業の打刻はすぐ保存します。位置は最大60秒測位し、座標を端末内に保存します。住所の外部照会は行いません。画面を開いたままお待ちください。保存済みの打刻位置は再取得で上書きしません。</p>
   </section>
 
   <section class="card no-print">
@@ -87,11 +88,25 @@
     <div id="history"></div>
   </section>
 
-  <section class="card no-print">
+  <section class="card no-print" id="dataProtection">
     <h2>データ保護・アプリ</h2>
     <div class="backup-grid"><button id="installBtn" class="btn soft">ホーム画面にインストール</button><button id="backupBtn" class="btn soft">バックアップ</button><button id="restoreBtn" class="btn soft">復元</button><input id="restoreFile" type="file" accept="application/json" hidden><button id="clearTestBtn" class="btn danger">全データ削除</button></div>
     <p><a href="./gps-check.html">GPSが取得できない場合の確認</a></p>
     <div id="appStatus" class="hint"></div>
+    <p id="offlineStatus" class="hint" role="status">オフライン準備中…</p>
+    <button id="reloadAppBtn" class="btn soft" hidden onclick="location.reload()">最新版を開く</button>
+    <p class="hint">Android：Chromeの「︙」→「ホーム画面に追加」または「アプリをインストール」。初回読み込みとオフライン準備の完了後に利用できます。APKではありません。</p>
+    <p class="hint">勤怠・GPS・確認履歴はこのブラウザーに保存し、アプリから外部へ送信しません。ブラウザーのデータ消去や端末紛失で消えるため、定期的にバックアップしてください。別の端末・URLには自動移行しません。公式資料のリンクを開くと外部サイトへ接続します。</p>
+  </section>
+
+  <section class="card law-guide no-print" id="lawGuide" aria-labelledby="lawTitle">
+    <div class="law-heading"><div><span class="law-eyebrow">運送業 法令・改善確認</span><h2 id="lawTitle">法改正 虎の巻</h2></div><span class="badge pending">資料確認日 2026/09/19</span></div>
+    <p>いつから、誰が、何をするか。日々の運行と事業所の対応を確認できます。</p>
+    <p class="hint">確認済みは内容を読んだ記録です。法令適合の認定や行政への届出にはなりません。2028年欄は公布後3年以内に施行される制度の準備項目です。</p>
+    <div class="law-filters"><label>対象年<select id="lawYear"><option value="all">すべての年</option><option value="2024">2024年・施行済み</option><option value="2026">2026年・施行済み</option><option value="2028">2028年まで・施行準備</option></select></label><label>キーワード<input id="lawSearch" type="search" placeholder="休息、委託、許可など"></label><label class="law-checkbox"><input id="lawUnchecked" type="checkbox">未確認のみ</label></div>
+    <p id="lawProgress" role="status"></p><p id="lawSaveStatus" role="status" class="hint"></p>
+    <div id="lawCards"></div>
+    <p class="hint">2025年4月施行の書面交付・実運送体制管理簿等も継続対応が必要です。<a href="https://www.mlit.go.jp/jidosha/jidosha_mn4_000014.html" target="_blank" rel="noopener noreferrer">国土交通省の2025年改正資料</a>を確認してください。本文と確認状態はオフラインでも利用できます。公式資料の閲覧には通信が必要です。</p>
   </section>
 
   <section class="card rules-card no-print">
@@ -99,6 +114,7 @@
     <p class="hint">2024年4月適用のトラック運転者の改善基準告示を参考にした補助判定です。通常ルールとして、1日13時間、最大15時間、休息11時間を基本・9時間未満不可、2日平均1日9時間、2週平均1週44時間、連続運転4時間を確認します。宿泊を伴う長距離貨物運送、フェリー、2人乗務、予期し得ない事象などの例外は自動適用しません。休憩以外の運転中断や10分未満の中断は要確認として表示します。10分未満の休憩が3回以上続く場合は違反表示します。運転の中断は休憩のみを算入し、荷役・待機等ではリセットしません（厳格判定）。同日の複数勤務や短い勤務間隔でも連続運転を引き継ぎます。月284時間・暦年3300時間を超えた日以降は累計超過を表示します。14時間超が週3回以上、または連日の場合は注意表示します（週は月～日）。13時間超の拘束・9時間以上11時間未満の休息は注意として区別します。総合欄に該当する違反・注意・判定待ちをすべて表示します。記録のない日は0時間として集計します。</p>
   </section>
 </main>
-<script src="app.js?v=8.6.7" defer></script>
+<script src="law-guide.js?v=8.7.0" defer></script>
+<script src="app.js?v=8.7.0" defer></script>
 </body>
 </html>
