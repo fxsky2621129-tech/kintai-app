@@ -1,12 +1,12 @@
 {
-  "name": "運送業 勤怠・改善基準チェッカー v8.6.7",
+  "name": "運送業 勤怠・改善基準チェッカーと法改正 虎の巻",
   "short_name": "勤怠チェッカー",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "background_color": "#f3f6fb",
   "theme_color": "#0f172a",
-  "description": "トラック運転者向けワンタップ勤怠・GPS・改善基準チェック",
+  "description": "勤怠打刻・改善基準チェック・法改正確認を端末内に保存",
   "icons": [
     {
       "src": "icon-192.png",

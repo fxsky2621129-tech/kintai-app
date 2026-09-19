@@ -1,7 +1,8 @@
 'use strict';
 
-const APP_VERSION='8.6.7';
+const APP_VERSION='8.7.0';
 const KEYS={
+  lawChecks:'truck_kintai_v8_law_checks',
   records:'truck_kintai_v8_records',
   settings:'truck_kintai_v8_settings',
   live:'truck_kintai_v8_live',
@@ -12,8 +13,7 @@ const KEYS={
 const LEGACY={records:'truck_kintai_v6_records',settings:'truck_kintai_v6_settings',live:'truck_kintai_v6_live',rest:'truck_kintai_v6_rest'};
 const TYPES={drive:'運転',wait:'待機',load:'荷積み',unload:'荷卸し',break:'休憩',other:'その他'};
 const PREFS=['北海道','青森県','岩手県','宮城県','秋田県','山形県','福島県','茨城県','栃木県','群馬県','埼玉県','千葉県','東京都','神奈川県','新潟県','富山県','石川県','福井県','山梨県','長野県','岐阜県','静岡県','愛知県','三重県','滋賀県','京都府','大阪府','兵庫県','奈良県','和歌山県','鳥取県','島根県','岡山県','広島県','山口県','徳島県','香川県','愛媛県','高知県','福岡県','佐賀県','長崎県','熊本県','大分県','宮崎県','鹿児島県','沖縄県'];
-const GSI_REVERSE='https://mreversegeocoder.gsi.go.jp/reverse-geocoder/LonLatToAddress';
-const LOCALGOV='https://code4fukui.github.io/localgovjp/localgovjp.json';
+const LOCALGOV='./localgovjp.json';
 const LOCALGOV_CACHE_KEY='truck_kintai_v8_localgov_cache';
 
 const RESTORE_JOURNAL='truck_kintai_v8_restore_journal';
@@ -23,6 +23,8 @@ let settings=load(KEYS.settings,{hourlyRate:1200,scheduledStart:'08:00',schedule
 let live=load(KEYS.live,null);
 let restState=load(KEYS.rest,null);
 let restLog=load(KEYS.restLog,[]);
+let lawChecks=load(KEYS.lawChecks,{});
+try{lawChecks=validateLawChecks(lawChecks)}catch{lawChecks={}}
 let installPrompt=null;
 let localGovRows=null;
 let localGovRequest=null;
@@ -125,17 +127,13 @@ async function getLocalGov(){
   })();
   return localGovRequest;
 }
-async function reverseGeocode(lat,lon){
-  try{const [j,rows]=await Promise.all([fetchJson(GSI_REVERSE+'?lat='+encodeURIComponent(lat)+'&lon='+encodeURIComponent(lon)),getLocalGov()]);
-    const x=j.results||{},code=String(x.muniCd||'').replace(/^0+/,''),muni=rows.find(v=>String(v.cid).replace(/^0+/,'')===code);
-    return {address:[muni?.pref,muni?.city,x.lv01Nm].filter(Boolean).join(' '),prefecture:muni?.pref||'',municipality:muni?.city||'',locality:x.lv01Nm||'',muniCd:x.muniCd||'',reverseError:muni?'':'市区町村未取得（通信復旧後に再取得できます）'};
-  }catch(e){return {address:'',reverseError:e.message||String(e)}}
-}
+async function reverseGeocode(){return {address:'',reverseError:'住所の外部照会は行いません'}}
+
 function hasCoordinates(g){return g?.status==='ok'&&Number.isFinite(g.lat)&&Number.isFinite(g.lon)}
 function gpsDisplay(g){
   if(!g)return '未取得';
   if(!hasCoordinates(g))return g.status==='pending'?'位置取得中（最大60秒）…':'未取得：'+(g.error||'再取得してください');
-  const place=[g.prefecture,g.municipality,g.locality].filter(Boolean).join(' ')||g.address||'座標取得済み・住所未取得';
+  const place=[g.prefecture,g.municipality,g.locality].filter(Boolean).join(' ')||g.address||`座標 ${g.lat.toFixed(5)}, ${g.lon.toFixed(5)}（端末内保存）`;
   return [place,g.locating?'精度を改善中…':'',g.addressPending?'住所確認中…':'',g.lateAcquisition?'打刻後の再取得位置（打刻時の位置ではありません）':'',g.retryError?'再取得失敗：保存済みの位置を保持':''].filter(Boolean).join(' ／ ');
 }
 function gpsError(err){
@@ -186,7 +184,7 @@ async function requestGps(id,field){
   gpsRequests.set(key,token);
   saveGpsTarget(id,field,hasCoordinates(previous)?{...previous,locating:true,retryError:''}:emptyGps(requestedAt));
   try{
-    const persist=g=>{if(current())saveGpsTarget(id,field,{...g,requestedAt,attemptAt,lateAcquisition:Math.abs(new Date(attemptAt)-new Date(requestedAt))>120000,addressPending:!g.locating&&navigator.onLine})};
+    const persist=g=>{if(current())saveGpsTarget(id,field,{...g,requestedAt,attemptAt,lateAcquisition:Math.abs(new Date(attemptAt)-new Date(requestedAt))>120000,addressPending:false})};
     const g=await acquireGps(persist);if(!current())return;
     if(!hasCoordinates(g)&&hasCoordinates(previous)){saveGpsTarget(id,field,{...previous,locating:false,retryError:g.error||'再取得失敗'});return}
     persist(g);if(hasCoordinates(g))await enrichGpsAddress(id,field,epoch,token);
@@ -471,7 +469,7 @@ function saveSettings(){
 }
 function exportCsv(){const month=$('monthPicker').value||nowMonth(),{daily}=aggregateForMonth(month),[y,m]=month.split('-').map(Number),days=new Date(y,m,0).getDate();const out=[['日付','曜日','出勤','開始場所','開始精度m','退勤','終了場所','終了精度m','拘束','実働','運転','待機','荷積','荷卸','休憩','その他','時間外','深夜','概算時間外等円','休憩判定','24h拘束','休息','2日平均','2週平均','総合','復路','往路']];for(let day=1;day<=days;day++){const k=`${y}-${pad(m)}-${pad(day)}`,d=daily.get(k),dt=new Date(y,m-1,day);if(!d){out.push([k,dayLabel(dt),...Array(25).fill('')]);continue}const sg=d.records.map(r=>r.startGps||{}),eg=d.records.map(r=>r.endGps||{});out.push([k,dayLabel(dt),d.records.map(r=>fmtTime(r.start)).join('/'),sg.map(g=>startGpsDisplay(g)).join(' / '),sg.map(g=>g.accuracy??'').join('/'),d.records.map(r=>fmtTime(r.end)).join('/'),eg.map(g=>gpsDisplay(g)).join(' / '),eg.map(g=>g.accuracy??'').join('/'),fmtHM(d.duration),fmtHM(d.work),fmtHM(d.by.drive),fmtHM(d.by.wait),fmtHM(d.by.load),fmtHM(d.by.unload),fmtHM(d.by.break),fmtHM(d.by.other),fmtHM(d.ot),fmtHM(d.night),Math.round(d.pay),d.breakShort>0?`不足${Math.round(d.breakShort*60)}分`:'適合',`${d.rolling24>15?'違反':d.rolling24>13?'注意':'適合'} ${fmtHM(d.rolling24)}`,d.records.map(r=>r.restAfter===null?'判定待ち':fmtHM(r.restAfter)).join('/'),twoDayText(d.twoDay),biweekText(d),[d.level==='bad'?'違反':d.level==='warn'?'注意':d.level==='pending'?'判定待ち':'適合',issuesText(d.issues)].filter(Boolean).join('\n'),d.returnMemo.join(' / '),d.outboundMemo.join(' / ')])}downloadBlob('\uFEFF'+out.map(r=>r.map(csvCell).join(',')).join('\r\n'),`kintai_${month}.csv`,'text/csv;charset=utf-8')}
 function downloadBlob(content,name,type){const b=new Blob([content],{type}),u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
-function backup(){const data={app:'truck-kintai-v8',version:APP_VERSION,exportedAt:new Date().toISOString(),records,settings,live,restState,restLog};downloadBlob(JSON.stringify(data,null,2),`kintai_backup_${dateKey(new Date())}.json`,'application/json')}
+function backup(){const data={app:'truck-kintai-v8',version:APP_VERSION,exportedAt:new Date().toISOString(),records,settings,live,restState,restLog,lawChecks};downloadBlob(JSON.stringify(data,null,2),`kintai_backup_${dateKey(new Date())}.json`,'application/json')}
 function recoverRestore(){
   const raw=localStorage.getItem(RESTORE_JOURNAL);if(!raw)return;
   const previous=JSON.parse(raw);
@@ -479,7 +477,17 @@ function recoverRestore(){
     if(!Object.hasOwn(previous,key))throw new Error('復元保護データが不正です');
     if(previous[key]===null)localStorage.removeItem(key);else localStorage.setItem(key,previous[key]);
   }
+  if(Object.hasOwn(previous,KEYS.lawChecks)){if(previous[KEYS.lawChecks]===null)localStorage.removeItem(KEYS.lawChecks);else localStorage.setItem(KEYS.lawChecks,previous[KEYS.lawChecks])}
   localStorage.removeItem(RESTORE_JOURNAL);
+}
+function validateLawChecks(value){
+  if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('法改正の確認履歴が不正です');
+  const clean={};
+  for(const [id,item] of Object.entries(value)){
+    if(!/^law-[a-z0-9-]{1,80}$/.test(id)||!item||!Number.isInteger(item.revision)||item.revision<1||typeof item.checkedAt!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(item.checkedAt)||!Number.isFinite(Date.parse(item.checkedAt))||new Date(item.checkedAt).toISOString()!==item.checkedAt)throw new Error('法改正の確認履歴が不正です');
+    clean[id]={revision:item.revision,checkedAt:item.checkedAt};
+  }
+  return clean;
 }
 function validateSettings(value){
   if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('設定形式が違います');
@@ -556,17 +564,19 @@ function validateBackup(input){
     if(new Date(start)>new Date(candidate.live.start))fail('勤務中の休息開始が不正です');
     candidate.restLog.push({id:uid(),start,end:candidate.live.start});candidate.restState=null;
   }
+  candidate.lawChecks=validateLawChecks(Object.hasOwn(input,'lawChecks')?input.lawChecks:lawChecks);
   calcRecords(candidate.records);return candidate;
 }
 function commitBackup(candidate){
-  const pairs=[[KEYS.records,candidate.records],[KEYS.settings,candidate.settings],[KEYS.live,candidate.live],[KEYS.rest,candidate.restState],[KEYS.restLog,candidate.restLog]];
+  const pairs=[[KEYS.records,candidate.records],[KEYS.settings,candidate.settings],[KEYS.live,candidate.live],[KEYS.rest,candidate.restState],[KEYS.restLog,candidate.restLog],[KEYS.lawChecks,candidate.lawChecks]];
   const previous={};for(const [key] of pairs)previous[key]=localStorage.getItem(key);
   // The journal remains until all writes succeed, including across a tab/browser interruption.
   localStorage.setItem(RESTORE_JOURNAL,JSON.stringify(previous));
   try{for(const [key,value] of pairs)store(key,value);localStorage.removeItem(RESTORE_JOURNAL)}
   catch(e){try{recoverRestore()}catch(rollbackError){throw new Error('保存に失敗しました。元データは復元保護領域に保持しています。空き容量を確保して再読み込みしてください')}throw e}
   dataEpoch++;gpsRequests.clear();
-  records=candidate.records;settings=candidate.settings;live=candidate.live;restState=candidate.restState;restLog=candidate.restLog;
+  records=candidate.records;settings=candidate.settings;live=candidate.live;restState=candidate.restState;restLog=candidate.restLog;lawChecks=candidate.lawChecks;
+  if(typeof renderLawGuide==='function')renderLawGuide();
 }
 function restoreFile(file){
   const fr=new FileReader();
@@ -578,7 +588,7 @@ function restoreFile(file){
   };
   fr.readAsText(file);
 }
-function clearAll(){if(!confirm('勤怠・GPS・設定をすべて削除します。よろしいですか？'))return;dataEpoch++;gpsRequests.clear();for(const k of Object.values(KEYS))localStorage.removeItem(k);for(const k of Object.values(LEGACY)){localStorage.removeItem(k);localStorage.removeItem(k.replace('_v6_','_v7_'))}for(const k of ['truck_kintai_v8_migrated_801','truck_kintai_v8_migrated_802'])localStorage.removeItem(k);records=[];settings={hourlyRate:1200,scheduledStart:'08:00',scheduledEnd:'17:00',dailyStandardHours:8,biweekStart:'2026-01-05'};live=null;restState=null;restLog=[];loadRouteFromLive();renderSettings();renderAll()}
+function clearAll(){if(!confirm('勤怠・GPS・設定・法改正の確認履歴をすべて削除します。よろしいですか？'))return;dataEpoch++;gpsRequests.clear();for(const k of Object.values(KEYS))localStorage.removeItem(k);for(const k of Object.values(LEGACY)){localStorage.removeItem(k);localStorage.removeItem(k.replace('_v6_','_v7_'))}for(const k of ['truck_kintai_v8_migrated_801','truck_kintai_v8_migrated_802'])localStorage.removeItem(k);records=[];settings={hourlyRate:1200,scheduledStart:'08:00',scheduledEnd:'17:00',dailyStandardHours:8,biweekStart:'2026-01-05'};live=null;restState=null;restLog=[];lawChecks={};if(typeof renderLawGuide==='function')renderLawGuide();loadRouteFromLive();renderSettings();renderAll()}
 
 function bind(){
   $('startShiftBtn').onclick=startShift;$('endShiftBtn').onclick=endShift;$('retryStartGpsBtn').onclick=retryStartGps;$('retryEndGpsBtn').onclick=retryEndGps;$('restStartBtn').onclick=startRest;$('restEndBtn').onclick=endRest;$('saveSettingsBtn').onclick=saveSettings;$('refreshBtn').onclick=renderMonth;$('csvBtn').onclick=exportCsv;$('printBtn').onclick=()=>window.print();$('backupBtn').onclick=backup;$('restoreBtn').onclick=()=>$('restoreFile').click();$('restoreFile').onchange=e=>{if(e.target.files[0])restoreFile(e.target.files[0]);e.target.value=''};$('clearTestBtn').onclick=clearAll;$('monthPicker').onchange=renderMonth;
@@ -589,7 +599,18 @@ function bind(){
   window.addEventListener('online',async()=>{renderAppStatus();await Promise.all(['return','out'].map(p=>populateCity(p,$(p+'City').value)));syncRouteToLive();void retryMissingAddresses()});window.addEventListener('offline',renderAppStatus);
   window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('installBtn').disabled=false});$('installBtn').onclick=async()=>{if(installPrompt){installPrompt.prompt();await installPrompt.userChoice;installPrompt=null}else alert('Chromeのメニューから「アプリをインストール」または「ホーム画面に追加」を選んでください。')};
 }
-function initPwa(){if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').then(r=>r.update()).catch(e=>console.warn(e))}}
+function initPwa(){
+  const status=$('offlineStatus');
+  if(!('serviceWorker' in navigator)){status.textContent='オフライン機能にはHTTPS対応ブラウザーが必要です。';return}
+  const hadController=!!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{status.textContent='オフラインで利用できます。';if(hadController){$('reloadAppBtn').hidden=false;status.textContent='新しい版の準備ができました。入力内容を保存して「最新版を開く」を押してください。'}});
+  navigator.serviceWorker.register('./sw.js').then(async r=>{
+    if(r.active)status.textContent='オフラインで利用できます。';
+    const watch=w=>{if(w)w.addEventListener('statechange',()=>{if(w.state==='redundant')status.textContent='オフライン準備に失敗しました。通信状態を確認して再読み込みしてください。'})};
+    watch(r.installing);r.addEventListener('updatefound',()=>watch(r.installing));
+    try{await r.update()}catch(e){if(!r.active)status.textContent='オフライン準備を完了できませんでした。通信状態を確認してください。'}
+  }).catch(()=>{status.textContent='オフライン準備に失敗しました。HTTPS・通信状態・保存設定を確認してください。'});
+}
 async function init(){migrateLegacy();ensureAutoDriveLive();if(live&&restState)finishRestAt(live.start);recoverPendingGps();$('monthPicker').value=nowMonth();renderSettings();bind();const routes=initRouteSelectors();renderAll();renderClock();setInterval(()=>{renderClock();if(live){renderStatus();renderActivities()}if(restState)renderRest()},1000);setInterval(()=>{if(live)renderMonth()},15000);initPwa();await routes;void retryMissingAddresses()}
 
 document.addEventListener('DOMContentLoaded',init);
