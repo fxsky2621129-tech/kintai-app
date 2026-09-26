@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0f172a">
   <meta name="description" content="トラック運転者向けの勤怠・改善基準チェックPWA">
-  <title>運送業 勤怠・改善基準チェッカー v8.8.0</title>
+  <title>運送業 勤怠・改善基準チェッカー v8.8.1</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="style.css?v=8.8.0">
+  <link rel="stylesheet" href="style.css?v=8.8.1">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -17,30 +17,12 @@
 <body>
 <header>
   <div class="header-row">
-    <div><h1>🚚 勤怠・改善基準チェッカー <small>v8.8.0</small></h1><p>ワンタップ打刻・GPS・月間集計・改善基準チェック</p></div>
+    <div><h1>🚚 勤怠・改善基準チェッカー <small>v8.8.1</small></h1><p>ワンタップ打刻・GPS・月間集計・改善基準チェック</p></div>
     <div id="liveClock" class="clock">--</div>
   </div>
 </header>
 <main>
-  <nav class="app-nav no-print" aria-label="アプリ内移動"><a href="#quickCheck">簡易確認</a><a href="#statusCard">勤怠打刻</a><a href="#lawGuide">法改正 虎の巻</a><a href="#dataProtection">保存・インストール</a></nav>
-  <section class="card quick-check no-print" id="quickCheck" aria-labelledby="quickTitle">
-    <div class="quick-heading"><div><span class="quick-eyebrow">自分の運行を、ひと目で</span><h2 id="quickTitle">改善基準告示 簡易確認</h2></div><a href="#statusCard" class="btn soft">打刻する ↓</a></div>
-    <div class="quick-toolbar"><label>確認する日<input id="quickDate" type="date"></label><button id="quickToday" type="button" class="btn soft">今日</button></div>
-    <div class="quick-verdict"><div><span>総合判定 · 通常基準</span><strong id="quickTotal" class="quick-total pending">確認待ち</strong></div><p id="quickSummary"></p></div>
-    <div class="quick-tabs" aria-label="確認する期間"><button type="button" data-quick-view="day" aria-pressed="true">日別</button><button type="button" data-quick-view="week" aria-pressed="false">週間</button><button type="button" data-quick-view="month" aria-pressed="false">月間</button><a href="#appSettings">設定</a></div>
-    <h3 id="quickDetailTitle">選んだ日</h3><div id="quickDetails"></div>
-    <details class="quick-explain" open><summary>判定の理由・確認すること</summary><ul id="quickReasons"></ul></details>
-    <details class="quick-explain"><summary>休日・特例の確認</summary>
-      <button id="quickDayOff" type="button" class="btn soft">休日として記録</button>
-      <p class="quick-note">未記録日は休日と決めつけず、確認待ちにします。休日の記録は、勤務のない終了済みの日に行えます。</p>
-      <label class="quick-checkbox"><input id="quickLong" type="checkbox">この日は宿泊を伴う長距離運行（特例を確認）</label>
-      <p class="quick-note">最大拘束16時間・休息8時間の特例には、週内すべての運行が450km以上、住所地外での休息、週2回まで等の条件があります。9時間未満の休息を含む運行の終了後は12時間以上の休息が必要です。チェックだけで通常基準の超過表示は解除しません。</p>
-      <label class="quick-checkbox"><input id="quickUnexpected" type="checkbox">この日は予期し得ない事象あり</label>
-      <p class="quick-note">事故・故障・災害等の客観的記録と対応時間を別途確認します。月間・年間・2週間の運転からは控除できません。</p>
-    </details>
-    <p id="quickSaveStatus" role="status" class="quick-note"></p>
-    <p class="quick-note">既存の打刻を使用。通常ルールの簡易確認で、特例を含む法令適合の確定判断ではありません。運転中断は休憩のみを算入する厳格確認です。<a href="https://driver-roudou-jikan.mhlw.go.jp/truck/notice" target="_blank" rel="noopener noreferrer">厚生労働省の基準</a> · 資料確認 2026/09/26</p>
-  </section>
+  <nav class="app-nav no-print" aria-label="アプリ内移動"><a href="#quickCheck">簡易確認</a><a href="#statusCard">勤怠打刻</a><button id="openLawGuideBtn" type="button" aria-haspopup="dialog" aria-controls="lawGuideDialog">法改正 虎の巻</button><a href="#dataProtection">保存・インストール</a></nav>
   <section class="card no-print" id="statusCard">
     <div class="status-grid">
       <div><span>勤務状態</span><strong id="shiftState">未始業</strong></div>
@@ -117,6 +99,32 @@
     <p class="hint">勤怠・GPS・確認履歴はこのブラウザーに保存し、アプリから外部へ送信しません。ブラウザーのデータ消去や端末紛失で消えるため、定期的にバックアップしてください。別の端末・URLには自動移行しません。公式資料のリンクを開くと外部サイトへ接続します。</p>
   </section>
 
+  <section class="card quick-check no-print" id="quickCheck" aria-labelledby="quickTitle">
+    <div class="quick-heading"><div><span class="quick-eyebrow">自分の運行を、ひと目で</span><h2 id="quickTitle">改善基準告示 簡易確認</h2></div><a href="#statusCard" class="btn soft">打刻へ戻る ↑</a></div>
+    <div class="quick-toolbar"><label>確認する日<input id="quickDate" type="date"></label><button id="quickToday" type="button" class="btn soft">今日</button></div>
+    <div class="quick-verdict"><div><span>総合判定 · 通常基準</span><strong id="quickTotal" class="quick-total pending">確認待ち</strong></div><p id="quickSummary"></p></div>
+    <div class="quick-tabs" aria-label="確認する期間"><button type="button" data-quick-view="day" aria-pressed="true">日別</button><button type="button" data-quick-view="week" aria-pressed="false">週間</button><button type="button" data-quick-view="month" aria-pressed="false">月間</button><a href="#appSettings">設定</a></div>
+    <h3 id="quickDetailTitle">選んだ日</h3><div id="quickDetails"></div>
+    <details class="quick-explain" open><summary>判定の理由・確認すること</summary><ul id="quickReasons"></ul></details>
+    <details class="quick-explain"><summary>休日・特例の確認</summary>
+      <button id="quickDayOff" type="button" class="btn soft">休日として記録</button>
+      <p class="quick-note">未記録日は休日と決めつけず、確認待ちにします。休日の記録は、勤務のない終了済みの日に行えます。</p>
+      <label class="quick-checkbox"><input id="quickLong" type="checkbox">この日は宿泊を伴う長距離運行（特例を確認）</label>
+      <p class="quick-note">最大拘束16時間・休息8時間の特例には、週内すべての運行が450km以上、住所地外での休息、週2回まで等の条件があります。9時間未満の休息を含む運行の終了後は12時間以上の休息が必要です。チェックだけで通常基準の超過表示は解除しません。</p>
+      <label class="quick-checkbox"><input id="quickUnexpected" type="checkbox">この日は予期し得ない事象あり</label>
+      <p class="quick-note">事故・故障・災害等の客観的記録と対応時間を別途確認します。月間・年間・2週間の運転からは控除できません。</p>
+    </details>
+    <p id="quickSaveStatus" role="status" class="quick-note"></p>
+    <p class="quick-note">既存の打刻を使用。通常ルールの簡易確認で、特例を含む法令適合の確定判断ではありません。運転中断は休憩のみを算入する厳格確認です。<a href="https://driver-roudou-jikan.mhlw.go.jp/truck/notice" target="_blank" rel="noopener noreferrer">厚生労働省の基準</a> · 資料確認 2026/09/26</p>
+  </section>
+
+  <section class="card rules-card no-print">
+    <h2>改善基準チェック（通常ルール・厳格確認）</h2>
+    <p class="hint">2024年4月適用のトラック運転者の改善基準告示を参考にした補助判定です。通常ルールとして、1日13時間、最大15時間、休息11時間を基本・9時間未満不可、2日平均1日9時間、2週平均1週44時間、連続運転4時間を確認します。宿泊を伴う長距離貨物運送、フェリー、2人乗務、予期し得ない事象などの例外は自動適用しません。休憩以外の運転中断や10分未満の中断は要確認として表示します。10分未満の休憩が3回以上続く場合は違反表示します。運転の中断は休憩のみを算入し、荷役・待機等ではリセットしません（厳格判定）。同日の複数勤務や短い勤務間隔でも連続運転を引き継ぎます。月284時間・暦年3300時間を超えた日以降は累計超過を表示します。14時間超が週3回以上、または連日の場合は注意表示します（週は月～日）。13時間超の拘束・9時間以上11時間未満の休息は注意として区別します。総合欄に該当する違反・注意・判定待ちをすべて表示します。記録のない日は0時間として集計します。</p>
+  </section>
+</main>
+<dialog id="lawGuideDialog" aria-labelledby="lawTitle">
+  <div class="law-dialog-toolbar"><button id="closeLawGuideBtn" type="button" class="btn soft" autofocus>閉じる ×</button></div>
   <section class="card law-guide no-print" id="lawGuide" aria-labelledby="lawTitle">
     <div class="law-heading"><div><span class="law-eyebrow">運送業 法令・改善確認</span><h2 id="lawTitle">法改正 虎の巻</h2></div><span class="badge pending">資料確認日 2026/09/19</span></div>
     <p>いつから、誰が、何をするか。日々の運行と事業所の対応を確認できます。</p>
@@ -126,14 +134,9 @@
     <div id="lawCards"></div>
     <p class="hint">2025年4月施行の書面交付・実運送体制管理簿等も継続対応が必要です。<a href="https://www.mlit.go.jp/jidosha/jidosha_mn4_000014.html" target="_blank" rel="noopener noreferrer">国土交通省の2025年改正資料</a>を確認してください。本文と確認状態はオフラインでも利用できます。公式資料の閲覧には通信が必要です。</p>
   </section>
-
-  <section class="card rules-card no-print">
-    <h2>改善基準チェック（通常ルール・厳格確認）</h2>
-    <p class="hint">2024年4月適用のトラック運転者の改善基準告示を参考にした補助判定です。通常ルールとして、1日13時間、最大15時間、休息11時間を基本・9時間未満不可、2日平均1日9時間、2週平均1週44時間、連続運転4時間を確認します。宿泊を伴う長距離貨物運送、フェリー、2人乗務、予期し得ない事象などの例外は自動適用しません。休憩以外の運転中断や10分未満の中断は要確認として表示します。10分未満の休憩が3回以上続く場合は違反表示します。運転の中断は休憩のみを算入し、荷役・待機等ではリセットしません（厳格判定）。同日の複数勤務や短い勤務間隔でも連続運転を引き継ぎます。月284時間・暦年3300時間を超えた日以降は累計超過を表示します。14時間超が週3回以上、または連日の場合は注意表示します（週は月～日）。13時間超の拘束・9時間以上11時間未満の休息は注意として区別します。総合欄に該当する違反・注意・判定待ちをすべて表示します。記録のない日は0時間として集計します。</p>
-  </section>
-</main>
-<script src="law-guide.js?v=8.8.0" defer></script>
-<script src="app.js?v=8.8.0" defer></script>
-<script src="quick-check.js?v=8.8.0" defer></script>
+</dialog>
+<script src="law-guide.js?v=8.8.1" defer></script>
+<script src="app.js?v=8.8.1" defer></script>
+<script src="quick-check.js?v=8.8.1" defer></script>
 </body>
 </html>

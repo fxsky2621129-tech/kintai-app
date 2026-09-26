@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION='8.8.0';
+const APP_VERSION='8.8.1';
 const KEYS={
   lawChecks:'truck_kintai_v8_law_checks',
   records:'truck_kintai_v8_records',

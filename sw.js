@@ -1,6 +1,6 @@
-const VERSION='kintai-v8-8-0-quick-20260926';
+const VERSION='kintai-v8-8-1-layout-20260926';
 const CACHE=`${VERSION}-app`;
-const SHELL=['./','./index.html','./style.css?v=8.8.0','./app.js?v=8.8.0','./quick-check.js?v=8.8.0','./law-guide.js?v=8.8.0','./manifest.webmanifest','./icon-192.png','./icon-512.png','./localgovjp.json','./gps-check.html','./gps-check.js'];
+const SHELL=['./','./index.html','./style.css?v=8.8.1','./app.js?v=8.8.1','./quick-check.js?v=8.8.1','./law-guide.js?v=8.8.1','./manifest.webmanifest','./icon-192.png','./icon-512.png','./localgovjp.json','./gps-check.html','./gps-check.js'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting()))});
 self.addEventListener('activate',e=>{e.waitUntil((async()=>{for(const k of await caches.keys()){if((k.startsWith('kintai-')||k.startsWith('truck-kintai-'))&&k!==CACHE)await caches.delete(k)}await self.clients.claim()})())});
 self.addEventListener('fetch',e=>{
