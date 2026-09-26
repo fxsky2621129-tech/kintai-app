@@ -48,3 +48,10 @@ document.addEventListener('DOMContentLoaded',()=>{
   renderLawGuide();
   window.addEventListener('storage',e=>{if(e.key===KEYS.lawChecks||e.key===null){try{lawChecks=validateLawChecks(load(KEYS.lawChecks,{}));renderLawGuide()}catch{document.getElementById('lawSaveStatus').textContent='確認履歴を読み込めませんでした。バックアップを確認してください。'}}});
 });
+
+// Native dialog supports Escape and returns focus to the opening button.
+document.addEventListener('DOMContentLoaded',()=>{
+  const dialog=document.getElementById('lawGuideDialog');
+  document.getElementById('openLawGuideBtn').addEventListener('click',()=>dialog.showModal());
+  document.getElementById('closeLawGuideBtn').addEventListener('click',()=>dialog.close());
+});
