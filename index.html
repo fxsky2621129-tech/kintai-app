@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0f172a">
   <meta name="description" content="トラック運転者向けの勤怠・改善基準チェックPWA">
-  <title>運送業 勤怠・改善基準チェッカー v8.8.1</title>
+  <title>運送業 勤怠・改善基準チェッカー v8.8.2</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="style.css?v=8.8.1">
+  <link rel="stylesheet" href="style.css?v=8.8.2">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -17,7 +17,7 @@
 <body>
 <header>
   <div class="header-row">
-    <div><h1>🚚 勤怠・改善基準チェッカー <small>v8.8.1</small></h1><p>ワンタップ打刻・GPS・月間集計・改善基準チェック</p></div>
+    <div><h1>🚚 勤怠・改善基準チェッカー <small>v8.8.2</small></h1><p>ワンタップ打刻・GPS・月間集計・改善基準チェック</p></div>
     <div id="liveClock" class="clock">--</div>
   </div>
 </header>
@@ -129,14 +129,34 @@
     <div class="law-heading"><div><span class="law-eyebrow">運送業 法令・改善確認</span><h2 id="lawTitle">法改正 虎の巻</h2></div><span class="badge pending">資料確認日 2026/09/19</span></div>
     <p>いつから、誰が、何をするか。日々の運行と事業所の対応を確認できます。</p>
     <p class="hint">確認済みは内容を読んだ記録です。法令適合の認定や行政への届出にはなりません。2028年欄は公布後3年以内に施行される制度の準備項目です。</p>
+
+    <section class="audit-checklist" aria-labelledby="auditTitle">
+      <h3 id="auditTitle">改善基準告示・監査重点チェック項目</h3>
+      <p class="audit-note">重要度はご自身の確認のための目安で、行政が定めた監査順位ではありません。通常基準を中心に、特例は条件も確認してください。資料確認日：2026/09/26。</p>
+      <table class="audit-table"><caption>重要度・項目・基準・監査／実務上の確認ポイント（11項目）</caption><thead><tr><th scope="col">重要度</th><th scope="col">項目</th><th scope="col">基準</th><th scope="col">監査・実務上の確認ポイント</th></tr></thead><tbody>
+<tr><td data-label="重要度">🔴 最重要</td><th scope="row">1日の拘束時間</th><td data-label="基準">原則13時間以内。延長しても15時間以内。14時間超は週2回までが目安。</td><td data-label="確認ポイント">出庫～帰庫だけでなく始業～終業で確認。1日は始業から24時間で、次の勤務が含まれる場合も確認。</td></tr>
+<tr><td data-label="重要度">🔴 最重要</td><th scope="row">休息期間</th><td data-label="基準">継続11時間以上を与えるよう努めることを基本とし、9時間を下回らない。</td><td data-label="確認ポイント">終業から次の始業まで、使用者の拘束を受けない時間を見る。</td></tr>
+<tr><td data-label="重要度">🔴 最重要</td><th scope="row">1か月拘束時間</th><td data-label="基準">原則284時間以内。</td><td data-label="確認ポイント">勤務表・デジタコ・運転日報を月単位で照合。労使協定による延長は別途条件を確認。</td></tr>
+<tr><td data-label="重要度">🔴 最重要</td><th scope="row">年間拘束時間</th><td data-label="基準">原則3,300時間以内。</td><td data-label="確認ポイント">毎月の累計と会社の起算日を確認。月だけでなく年の上限も管理。</td></tr>
+<tr><td data-label="重要度">🔴 重要</td><th scope="row">連続運転時間</th><td data-label="基準">4時間以内。合計30分以上の中断を確保（原則、休憩）。</td><td data-label="確認ポイント">分割する中断は1回おおむね10分以上。10分未満の中断が3回以上連続しないこと等も確認。駐停車できない場合の例外は個別確認。</td></tr>
+<tr><td data-label="重要度">🔴 重要</td><th scope="row">2日平均運転時間</th><td data-label="基準">2日平均で1日9時間以内。</td><td data-label="確認ポイント">単日だけで判断しない。特定日と前日、特定日と翌日の各48時間の平均を確認し、両方9時間を超える場合に違反となる。</td></tr>
+<tr><td data-label="重要度">🔴 重要</td><th scope="row">2週平均運転時間</th><td data-label="基準">2週間平均で1週44時間以内（2週間合計88時間以内）。</td><td data-label="確認ポイント">起算日から2週間ごとに区切り、デジタコ等の運転時間を集計。</td></tr>
+<tr><td data-label="重要度">🟠 重要</td><th scope="row">休日労働</th><td data-label="基準">2週間に1回以内。休日労働によって拘束時間の上限を超えない。</td><td data-label="確認ポイント">法定休日・休日の振替の扱いと、対象となる2週間の休日労働の回数を確認。連続しているかだけで判断しない。</td></tr>
+<tr><td data-label="重要度">🟠 重要</td><th scope="row">長距離運行特例</th><td data-label="基準">条件を満たす場合のみ、最大拘束16時間・休息8時間以上を各週2回まで。</td><td data-label="確認ポイント">週内の全運行が450km以上で、住所地外での休息等の条件が必要。9時間未満の休息を含む運行の終了後は継続12時間以上の休息。「長距離だから自動適用」ではない。</td></tr>
+<tr><td data-label="重要度">🟠 重要</td><th scope="row">分割休息</th><td data-label="基準">継続9時間以上の休息を与えることが困難な場合の例外。1回継続3時間以上、2分割は合計10時間以上、3分割は合計12時間以上。</td><td data-label="確認ポイント">一定期間（1か月程度が限度）の全勤務回数の2分の1まで。3分割の日が連続しないよう努める。日常的な運用や長距離特例併用時は条件を確認。</td></tr>
+<tr><td data-label="重要度">🟠 重要</td><th scope="row">1運行144時間</th><td data-label="基準">一の運行の最初の勤務開始から最後の勤務終了まで144時間以内。</td><td data-label="確認ポイント">長距離・数日運行で、休息を含む経過時間を確認。国土交通省の別の基準による規定。フェリー乗船時の対象休息期間は除外。</td></tr>
+      </tbody></table>
+      <details class="audit-notes"><summary>特例・出典の補足</summary><p>労使協定による拘束時間の延長は年3,400時間・月310時間まで（年6か月まで）。284時間超は連続3か月まで等の条件があります。分割休息や長距離特例の併用も、公式資料で条件を確認してください。</p><p>この表は確認用の資料です。休日労働・分割休息・1運行144時間など、この表の全項目がアプリの自動判定に追加されるわけではありません。</p><ul><li><a href="https://driver-roudou-jikan.mhlw.go.jp/truck/notice" target="_blank" rel="noopener noreferrer">厚生労働省：トラック運転者の改善基準告示・特例</a></li><li><a href="https://www.mhlw.go.jp/content/2023_Pamphlet_T.pdf" target="_blank" rel="noopener noreferrer">厚生労働省：パンフレット（休日労働等）</a></li><li><a href="https://driver-roudou-jikan.mhlw.go.jp/pdf/ltxt-truck.pdf" target="_blank" rel="noopener noreferrer">厚生労働省：学習テキスト（2日平均等）</a></li><li><a href="https://www.mlit.go.jp/notice/noticedata/sgml/2001/68aa2676/68aa2676.html" target="_blank" rel="noopener noreferrer">国土交通省：勤務時間・乗務時間の基準（1運行144時間）</a></li></ul></details>
+    </section>
+    <h3 class="law-articles-title">法改正の記事を確認</h3>
     <div class="law-filters"><label>対象年<select id="lawYear"><option value="all">すべての年</option><option value="2024">2024年・施行済み</option><option value="2026">2026年・施行済み</option><option value="2028">2028年まで・施行準備</option></select></label><label>キーワード<input id="lawSearch" type="search" placeholder="休息、委託、許可など"></label><label class="law-checkbox"><input id="lawUnchecked" type="checkbox">未確認のみ</label></div>
     <p id="lawProgress" role="status"></p><p id="lawSaveStatus" role="status" class="hint"></p>
     <div id="lawCards"></div>
     <p class="hint">2025年4月施行の書面交付・実運送体制管理簿等も継続対応が必要です。<a href="https://www.mlit.go.jp/jidosha/jidosha_mn4_000014.html" target="_blank" rel="noopener noreferrer">国土交通省の2025年改正資料</a>を確認してください。本文と確認状態はオフラインでも利用できます。公式資料の閲覧には通信が必要です。</p>
   </section>
 </dialog>
-<script src="law-guide.js?v=8.8.1" defer></script>
-<script src="app.js?v=8.8.1" defer></script>
-<script src="quick-check.js?v=8.8.1" defer></script>
+<script src="law-guide.js?v=8.8.2" defer></script>
+<script src="app.js?v=8.8.2" defer></script>
+<script src="quick-check.js?v=8.8.2" defer></script>
 </body>
 </html>
