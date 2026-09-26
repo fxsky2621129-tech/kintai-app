@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION='8.7.0';
+const APP_VERSION='8.8.0';
 const KEYS={
   lawChecks:'truck_kintai_v8_law_checks',
   records:'truck_kintai_v8_records',
@@ -455,7 +455,7 @@ function renderHistory(){
   }
 }
 function renderAppStatus(){$('appStatus').textContent=`${navigator.onLine?'オンライン':'オフライン'} ／ v${APP_VERSION} ／ データ保存先：この端末のブラウザ`}
-function renderAll(){renderStatus();renderActivities();renderRest();renderMonth();renderHistory();renderAppStatus()}
+function renderAll(){renderStatus();renderActivities();renderRest();renderMonth();renderHistory();renderAppStatus();if(typeof renderQuickCheck==='function')renderQuickCheck()}
 
 window.retryRecordStart=async id=>retryGps(id,'startGps');
 window.retryRecordEnd=async id=>setEndGpsForRecord(id);
@@ -463,8 +463,8 @@ window.deleteRecord=id=>{if(!confirm('この勤務記録を削除しますか？
 
 function saveSettings(){
   try{
-    const candidate=validateSettings({hourlyRate:Number($('hourlyRate').value),scheduledStart:$('scheduledStart').value,scheduledEnd:$('scheduledEnd').value,dailyStandardHours:Number($('dailyStandardHours').value),biweekStart:$('biweekStart').value});
-    store(KEYS.settings,candidate);settings=candidate;renderMonth();alert('設定を保存しました');
+    const candidate=validateSettings({...settings,hourlyRate:Number($('hourlyRate').value),scheduledStart:$('scheduledStart').value,scheduledEnd:$('scheduledEnd').value,dailyStandardHours:Number($('dailyStandardHours').value),biweekStart:$('biweekStart').value});
+    store(KEYS.settings,candidate);settings=candidate;renderAll();alert('設定を保存しました');
   }catch(e){alert('設定を保存できません：'+e.message)}
 }
 function exportCsv(){const month=$('monthPicker').value||nowMonth(),{daily}=aggregateForMonth(month),[y,m]=month.split('-').map(Number),days=new Date(y,m,0).getDate();const out=[['日付','曜日','出勤','開始場所','開始精度m','退勤','終了場所','終了精度m','拘束','実働','運転','待機','荷積','荷卸','休憩','その他','時間外','深夜','概算時間外等円','休憩判定','24h拘束','休息','2日平均','2週平均','総合','復路','往路']];for(let day=1;day<=days;day++){const k=`${y}-${pad(m)}-${pad(day)}`,d=daily.get(k),dt=new Date(y,m-1,day);if(!d){out.push([k,dayLabel(dt),...Array(25).fill('')]);continue}const sg=d.records.map(r=>r.startGps||{}),eg=d.records.map(r=>r.endGps||{});out.push([k,dayLabel(dt),d.records.map(r=>fmtTime(r.start)).join('/'),sg.map(g=>startGpsDisplay(g)).join(' / '),sg.map(g=>g.accuracy??'').join('/'),d.records.map(r=>fmtTime(r.end)).join('/'),eg.map(g=>gpsDisplay(g)).join(' / '),eg.map(g=>g.accuracy??'').join('/'),fmtHM(d.duration),fmtHM(d.work),fmtHM(d.by.drive),fmtHM(d.by.wait),fmtHM(d.by.load),fmtHM(d.by.unload),fmtHM(d.by.break),fmtHM(d.by.other),fmtHM(d.ot),fmtHM(d.night),Math.round(d.pay),d.breakShort>0?`不足${Math.round(d.breakShort*60)}分`:'適合',`${d.rolling24>15?'違反':d.rolling24>13?'注意':'適合'} ${fmtHM(d.rolling24)}`,d.records.map(r=>r.restAfter===null?'判定待ち':fmtHM(r.restAfter)).join('/'),twoDayText(d.twoDay),biweekText(d),[d.level==='bad'?'違反':d.level==='warn'?'注意':d.level==='pending'?'判定待ち':'適合',issuesText(d.issues)].filter(Boolean).join('\n'),d.returnMemo.join(' / '),d.outboundMemo.join(' / ')])}downloadBlob('\uFEFF'+out.map(r=>r.map(csvCell).join(',')).join('\r\n'),`kintai_${month}.csv`,'text/csv;charset=utf-8')}
@@ -496,6 +496,16 @@ function validateSettings(value){
   if(!Number.isFinite(s.dailyStandardHours)||s.dailyStandardHours<1||s.dailyStandardHours>12)throw new Error('所定実働が不正です');
   if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.scheduledStart)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.scheduledEnd)||s.scheduledStart===s.scheduledEnd)throw new Error('所定開始・終了を異なる有効な時刻にしてください');
   if(!/^\d{4}-\d{2}-\d{2}$/.test(s.biweekStart)||!validTimestamp(s.biweekStart+'T00:00:00'))throw new Error('起算日が不正です');
+  if(value.quickCheck!=null){
+    const q=value.quickCheck,validDay=k=>typeof k==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(k)&&validTimestamp(k+'T00:00:00');
+    if(!q||typeof q!=='object'||Array.isArray(q)||!Array.isArray(q.daysOff)||q.daysOff.length>20000||!q.daysOff.every(validDay)||!q.exceptions||typeof q.exceptions!=='object'||Array.isArray(q.exceptions))throw new Error('簡易確認の設定が不正です');
+    const exceptions={};
+    for(const [k,v] of Object.entries(q.exceptions)){
+      if(!validDay(k)||!v||typeof v!=='object'||typeof v.longDistance!=='boolean'||typeof v.unexpected!=='boolean')throw new Error('特例の確認記録が不正です');
+      exceptions[k]={longDistance:v.longDistance,unexpected:v.unexpected};
+    }
+    s.quickCheck={daysOff:[...new Set(q.daysOff)],exceptions};
+  }
   return s;
 }
 function validTimestamp(v){
@@ -611,6 +621,6 @@ function initPwa(){
     try{await r.update()}catch(e){if(!r.active)status.textContent='オフライン準備を完了できませんでした。通信状態を確認してください。'}
   }).catch(()=>{status.textContent='オフライン準備に失敗しました。HTTPS・通信状態・保存設定を確認してください。'});
 }
-async function init(){migrateLegacy();ensureAutoDriveLive();if(live&&restState)finishRestAt(live.start);recoverPendingGps();$('monthPicker').value=nowMonth();renderSettings();bind();const routes=initRouteSelectors();renderAll();renderClock();setInterval(()=>{renderClock();if(live){renderStatus();renderActivities()}if(restState)renderRest()},1000);setInterval(()=>{if(live)renderMonth()},15000);initPwa();await routes;void retryMissingAddresses()}
+async function init(){migrateLegacy();ensureAutoDriveLive();if(live&&restState)finishRestAt(live.start);recoverPendingGps();$('monthPicker').value=nowMonth();renderSettings();bind();const routes=initRouteSelectors();renderAll();renderClock();setInterval(()=>{renderClock();if(live){renderStatus();renderActivities()}if(restState)renderRest()},1000);setInterval(()=>{if(live)renderMonth();if(typeof renderQuickCheck==='function')renderQuickCheck()},15000);initPwa();await routes;void retryMissingAddresses()}
 
 document.addEventListener('DOMContentLoaded',init);
